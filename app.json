@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "scheme": "acme",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-router",
+      "expo-asset",
+      "react-native-video",
+      "expo-video"
+    ],
+    "name": "EmoLink",
+    "slug": "EmoLink",
+    "android": {
+      "newArchEnabled": true,
+      "package": "com.anonymous.EmoLink"
+    }
+  }
+}
