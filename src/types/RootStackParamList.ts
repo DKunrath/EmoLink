@@ -1,5 +1,5 @@
 export type RootStackParamList = {
-  StoryPageScreen: { storyId: string, useChildContent?: boolean };
+  StoryPageScreen: { storyId: string, useChildContent?: boolean , ageSelected?: string };
   doctorChats: {chatId: number};
   chat: { chatId: string };
     // Add other routes here if necessary

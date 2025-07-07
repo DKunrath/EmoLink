@@ -98,7 +98,6 @@ export const calculateUserStreak = async (userId: string): Promise<StreakResult>
       lastEntryDate: lastEntryDateString,
     }
   } catch (error) {
-    console.error("Erro ao calcular streak:", error)
     return {
       currentStreak: 0,
       longestStreak: 0,

@@ -11,6 +11,8 @@ import {
   ScrollView,
   SafeAreaView,
   Dimensions,
+  Platform,
+  Image,
 } from "react-native"
 import { useNavigation } from "@react-navigation/native"
 import { useLocalSearchParams, router } from "expo-router"
@@ -21,7 +23,12 @@ import { PanGestureHandler, State, GestureHandlerRootView } from "react-native-g
 import ViewShot from "react-native-view-shot"
 import * as FileSystem from "expo-file-system"
 import { useAlertContext } from "../../components/alert-provider"
-import { updateUserPoints } from '../../services/diary';
+//import { updateUserPoints } from '../../services/diary';
+import { updateUserPoints } from '../../services/pointsService';
+import FeedbackModal from '../../components/FeedbackModal';
+import { useFeedbackModal } from '../../hooks/useFeedbackModal';
+import { Character } from '../../types/feedback-modal';
+import { usePointsHistorySubscription } from '../../hooks/usePointsHistorySubscription';
 
 interface PathData {
   path: string
@@ -29,18 +36,39 @@ interface PathData {
   strokeWidth: number
 }
 
+interface Characters {
+  name: string
+  id: string
+  image: string
+}
+
+// Lista de personagens disponíveis
+const charactersImages: Characters[] = [
+  { name: "Amy", id: "amy", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Amy.png" },
+  { name: "Angelita", id: "angelita", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Angelita.png" },
+  { name: "Grãozinho", id: "graozinho", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Angelita.png" },
+  { name: "Lili", id: "lili", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Angelita.png" },
+]
+
 const ChallengeDetailScreen = () => {
   const params = useLocalSearchParams()
   const navigation = useNavigation()
   const { user } = useAuth()
   const [loading, setLoading] = useState(false)
   const [responseText, setResponseText] = useState("")
+  const [responseText2, setResponseText2] = useState("")
   const [paths, setPaths] = useState<PathData[]>([])
+  const [paths2, setPaths2] = useState<PathData[]>([]) // Paths for parent drawing
   const [currentPath, setCurrentPath] = useState<string>("")
+  const [currentPath2, setCurrentPath2] = useState<string>("") // Current path for parent drawing
   const [currentColor, setCurrentColor] = useState<string>("#000000")
+  const [currentColor2, setCurrentColor2] = useState<string>("#000000") // Color for parent drawing
   const [currentStrokeWidth, setCurrentStrokeWidth] = useState<number>(3)
+  const [currentStrokeWidth2, setCurrentStrokeWidth2] = useState<number>(3) // Stroke width for parent drawing
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [activeDrawingCanvas, setActiveDrawingCanvas] = useState<1 | 2>(1) // Track which canvas is active
   const viewShotRef = useRef<ViewShot>(null)
+  const viewShotRef2 = useRef<ViewShot>(null) // Ref for parent drawing
 
   const challengeId = params.challengeId as string
   const challengeTitle = params.challengeTitle as string
@@ -48,7 +76,104 @@ const ChallengeDetailScreen = () => {
   const challengeCharacter = params.challengeCharacter as string
   const allowsDrawing = params.allowsDrawing === "true"
   const challengeType = params.challengeType as string
-  const { success, error2, warning, info } = useAlertContext()
+  const { error2 } = useAlertContext()
+  const isParentChallenge = challengeType === "parents"
+
+  const { modalState, showFeedbackModal, hideFeedbackModal } = useFeedbackModal();
+  // Configurar subscrições para o histórico de pontos quando o usuário estiver autenticado
+  //usePointsHistorySubscription(user?.id);
+
+  const onTaskComplete = (points: number) => {
+    // Lista de personagens
+    const characters: Character[] = ['amy', 'angelita', 'graozinho'];
+
+    // Lista de mensagens motivacionais
+    const motivationalDailyMessages = [
+      'Parabéns! Você concluiu seu desafio diário com sucesso!',
+      'Fantástico! Seu esforço diário está valendo a pena!',
+      'Excelente trabalho! Você está construindo um hábito incrível!',
+      'Incrível! Cada dia concluído é um passo para o seu progresso!',
+      'Você é incrível! Continue vencendo seus desafios diários!',
+    ];
+
+    const motivationalWeeklyMessages = [
+      'Parabéns! Você concluiu seu desafio semanal com sucesso!',
+      'Fantástico! Sua dedicação durante a semana foi recompensada!',
+      'Excelente trabalho! Você superou mais um desafio semanal!',
+      'Incrível! Cada semana concluída é um grande passo para o seu crescimento!',
+      'Você é incrível! Continue conquistando seus objetivos semanais!',
+    ];
+
+    const motivationalParentMessages = [
+      'Parabéns! Você e seus pais concluíram este desafio juntos!',
+      'Fantástico! Trabalhar em equipe com sua família é incrível!',
+      'Excelente trabalho! Vocês superaram este desafio como uma equipe!',
+      'Incrível! Cada desafio concluído juntos fortalece seus laços familiares!',
+      'Vocês são incríveis! Continuem conquistando objetivos juntos!',
+    ];
+
+    // Função para selecionar um item aleatório de uma lista
+    const getRandomCharacter = (list: Character[]) => {
+      return list[Math.floor(Math.random() * list.length)];
+    };
+
+    const getRandomDailyMessage = (list: string[]) => {
+      return list[Math.floor(Math.random() * list.length)];
+    };
+
+    const getRandomWeeklyMessage = (list: string[]) => {
+      return list[Math.floor(Math.random() * list.length)];
+    };
+
+    const getRandomParentMessage = (list: string[]) => {
+      return list[Math.floor(Math.random() * list.length)];
+    };
+
+    if (points === 1) {
+      // Selecionar personagem e mensagem aleatórios
+      const randomCharacter = getRandomCharacter(characters);
+      const randomMessage = getRandomDailyMessage(motivationalDailyMessages);
+
+      // Mostrar o modal de feedback
+      showFeedbackModal(
+        randomCharacter, // personagem aleatório
+        randomMessage, // mensagem motivacional aleatória
+        points, // pontos ganhos
+        'challenge' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+      );
+    }
+    else if (points === 5) {
+      // Selecionar personagem e mensagem aleatórios
+      const randomCharacter = getRandomCharacter(characters);
+      const randomMessage = getRandomWeeklyMessage(motivationalWeeklyMessages);
+
+      // Mostrar o modal de feedback
+      showFeedbackModal(
+        randomCharacter, // personagem aleatório
+        randomMessage, // mensagem motivacional aleatória
+        points, // pontos ganhos
+        'challenge' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+      );
+    }
+    else if (points === 10) {
+      // Selecionar personagem e mensagem aleatórios
+      const randomCharacter = getRandomCharacter(characters);
+      const randomMessage = getRandomParentMessage(motivationalParentMessages);
+
+      // Mostrar o modal de feedback
+      showFeedbackModal(
+        randomCharacter, // personagem aleatório
+        randomMessage, // mensagem motivacional aleatória
+        points, // pontos ganhos
+        'challenge' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+      );
+    }
+  };
+
+  const handleCloseModal = () => {
+    hideFeedbackModal();
+    navigation.goBack()
+  };
 
   // Cores disponíveis para desenho
   const colors = ["#000000", "#FF0000", "#0000FF", "#008000", "#FFA500", "#800080", "#FFC0CB"]
@@ -56,10 +181,12 @@ const ChallengeDetailScreen = () => {
   // Espessuras de traço disponíveis
   const strokeWidths = [1, 3, 5, 8]
 
-  // Função para iniciar um novo traço
+  // Função para iniciar um novo traço no canvas 1 (criança)
   const onGestureStateChange = (event: any) => {
     const { nativeEvent } = event
     const { state, x, y } = nativeEvent
+
+    if (activeDrawingCanvas !== 1) return
 
     if (state === State.BEGAN) {
       setCurrentPath(`M ${x} ${y}`)
@@ -73,38 +200,58 @@ const ChallengeDetailScreen = () => {
     }
   }
 
-  // Função para limpar o desenho
+  // Função para iniciar um novo traço no canvas 2 (pais)
+  const onGestureStateChange2 = (event: any) => {
+    const { nativeEvent } = event
+    const { state, x, y } = nativeEvent
+
+    if (activeDrawingCanvas !== 2) return
+
+    if (state === State.BEGAN) {
+      setCurrentPath2(`M ${x} ${y}`)
+    } else if (state === State.ACTIVE) {
+      setCurrentPath2((prevPath) => `${prevPath} L ${x} ${y}`)
+    } else if (state === State.END) {
+      if (currentPath2) {
+        setPaths2([...paths2, { path: currentPath2, color: currentColor2, strokeWidth: currentStrokeWidth2 }])
+        setCurrentPath2("")
+      }
+    }
+  }
+
+  // Função para limpar o desenho da criança
   const clearDrawing = () => {
     setPaths([])
     setCurrentPath("")
   }
 
+  // Função para limpar o desenho dos pais
+  const clearDrawing2 = () => {
+    setPaths2([])
+    setCurrentPath2("")
+  }
+
   // Função melhorada para capturar o desenho como imagem
-  const captureDrawing = async (): Promise<string | null> => {
-    if (!viewShotRef.current || paths.length === 0) {
-      console.log("ViewShot ref não disponível ou não há caminhos para capturar")
+  // Modify the captureDrawing function to handle the correct types
+  const captureDrawing = async (ref: React.RefObject<any>, pathsArray: PathData[]): Promise<string | null> => {
+    if (!ref.current || pathsArray.length === 0) {
       return null
     }
 
     try {
-      console.log("Tentando capturar o desenho...")
-
-      // Verificar se o método capture existe e usá-lo com uma asserção de tipo
-      if (viewShotRef.current && typeof viewShotRef.current.capture === "function") {
-        const uri = await (viewShotRef.current as any).capture({
+      // Verificar se o método capture existe e usá-lo
+      if (ref.current && typeof ref.current.capture === "function") {
+        const uri = await ref.current.capture({
           format: "png",
           quality: 1,
           result: "tmpfile",
         })
 
-        console.log("Imagem capturada com sucesso:", uri)
         return uri
       } else {
-        console.error("Método capture não disponível no viewShotRef.current")
         return null
       }
     } catch (error) {
-      console.error("Erro ao capturar desenho:", error)
       return null
     }
   }
@@ -112,25 +259,21 @@ const ChallengeDetailScreen = () => {
   // Nova função para converter URI para base64
   const uriToBase64 = async (uri: string): Promise<string | null> => {
     try {
-      console.log("Convertendo URI para base64:", uri)
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       })
-      console.log("Conversão para base64 bem-sucedida, tamanho:", base64.length)
       return base64
     } catch (error) {
-      console.error("Erro ao converter URI para base64:", error)
       return null
     }
   }
 
   // Função melhorada para fazer upload da imagem para o Supabase Storage
-  const uploadDrawing = async (uri: string): Promise<string | null> => {
+  const uploadDrawing = async (uri: string, suffix: string = ""): Promise<string | null> => {
     if (!user) return null
 
     try {
-      console.log("Iniciando upload do desenho...")
-      const fileName = `${user.id}_${challengeId}_${Date.now()}.png`
+      const fileName = `${user.id}_${challengeId}${suffix}_${Date.now()}.png`
       const filePath = `challenges/${fileName}`
 
       // Converter URI para base64
@@ -146,19 +289,14 @@ const ChallengeDetailScreen = () => {
       })
 
       if (error) {
-        console.error("Erro no upload para storage:", error)
         throw error
       }
 
-      console.log("Upload bem-sucedido:", data)
-
       // Obter URL pública
       const { data: publicUrlData } = supabase.storage.from("drawings").getPublicUrl(filePath)
-      console.log("URL pública gerada:", publicUrlData.publicUrl)
 
       return publicUrlData.publicUrl
     } catch (error) {
-      console.error("Erro ao fazer upload do desenho:", error)
       return null
     }
   }
@@ -188,43 +326,75 @@ const ChallengeDetailScreen = () => {
       }
 
       let drawingUrl = null
+      let drawingUrl2 = null
 
-      // Se permite desenho e há traços, capturar e fazer upload
-      if (allowsDrawing && paths.length > 0) {
-        console.log("Preparando para capturar e fazer upload do desenho...")
-        const capturedUri = await captureDrawing()
+      // Validações específicas para desafios de pais
+      if (isParentChallenge) {
+        if (!allowsDrawing && (!responseText.trim() || !responseText2.trim())) {
+          error2("Erro ao salvar", "Por favor, forneça respostas tanto da criança quanto dos pais para completar o desafio.")
+          setLoading(false)
+          return
+        }
 
-        if (capturedUri) {
-          console.log("Desenho capturado, iniciando upload...")
-          drawingUrl = await uploadDrawing(capturedUri)
-          console.log("URL do desenho após upload:", drawingUrl)
-        } else {
-          console.log("Falha ao capturar o desenho")
+        if (allowsDrawing) {
+          // Verificar se ambos os desenhos foram feitos para desafios de pais
+          if (paths.length === 0) {
+            error2("Erro", "Por favor, faça o desenho da criança para completar o desafio.")
+            setLoading(false)
+            return
+          }
+
+          if (paths2.length === 0) {
+            error2("Erro", "Por favor, faça o desenho dos pais para completar o desafio.")
+            setLoading(false)
+            return
+          }
+
+          // Capturar e fazer upload de ambos os desenhos
+          const capturedUri = await captureDrawing(viewShotRef, paths)
+          const capturedUri2 = await captureDrawing(viewShotRef2, paths2)
+
+          if (capturedUri) {
+            drawingUrl = await uploadDrawing(capturedUri, "_child")
+          }
+
+          if (capturedUri2) {
+            drawingUrl2 = await uploadDrawing(capturedUri2, "_parent")
+          }
+
+          if (!drawingUrl || !drawingUrl2) {
+            error2("Erro", "Falha ao processar os desenhos. Tente novamente.")
+            setLoading(false)
+            return
+          }
+        }
+      } else {
+        // Validações para desafios normais
+        if (!allowsDrawing && !responseText.trim()) {
+          error2("Erro ao salvar", "Por favor, forneça uma resposta para completar o desafio.")
+          setLoading(false)
+          return
+        }
+
+        if (allowsDrawing && paths.length === 0) {
+          error2("Erro", "Por favor, faça um desenho para completar o desafio.")
+          setLoading(false)
+          return
+        }
+
+        // Se permite desenho e há traços, capturar e fazer upload
+        if (allowsDrawing && paths.length > 0) {
+          const capturedUri = await captureDrawing(viewShotRef, paths)
+
+          if (capturedUri) {
+            drawingUrl = await uploadDrawing(capturedUri)
+          } else {
+            error2("Erro", "Falha ao processar o desenho. Tente novamente.")
+            setLoading(false)
+            return
+          }
         }
       }
-
-      // Verificar se há resposta de texto ou desenho
-      if (!allowsDrawing && !responseText.trim()) {
-        //Alert.alert("Erro", "Por favor, forneça uma resposta para completar o desafio.")
-        error2("Erro ao salvar", "Por favor, forneça uma resposta para completar o desafio.")
-        setLoading(false)
-        return
-      }
-
-      if (allowsDrawing && paths.length === 0) {
-        error2("Erro", "Por favor, faça um desenho para completar o desafio.")
-        setLoading(false)
-        return
-      }
-
-      console.log("Salvando desafio completado no banco de dados...")
-      console.log("Dados a serem salvos:", {
-        user_id: user.id,
-        challenge_id: challengeId,
-        completed_at: new Date().toISOString(),
-        answer: responseText || null,
-        drawing_url: drawingUrl,
-      })
 
       // Registrar o desafio como concluído
       const { data, error } = await supabase
@@ -235,31 +405,30 @@ const ChallengeDetailScreen = () => {
             challenge_id: challengeId,
             completed_at: new Date().toISOString(),
             answer: responseText || null,
+            answer_2: responseText2 || null,
             drawing_url: drawingUrl,
+            drawing_url_2: drawingUrl2,
+            challenge_type: challengeType,
           },
         ])
         .select()
 
       if (error) {
-        console.error("Erro ao inserir na tabela:", error)
         throw error
       }
 
-      console.log("Desafio completado com sucesso:", data)
+      if (challengeType === "daily") {
+        await updateUserPoints(user.id, 1, "daily_challenge", "Desafio diário completado");
+        onTaskComplete(1); // Chama a função para mostrar o modal de feedback
 
-      if(challengeType === "daily") {
-        await updateUserPoints(user.id, 1);
-        success("Sucesso!", "Desafio Diário concluído com sucesso! Você ganhou 1 ponto!")
       } else if (challengeType === "weekly") {
-        await updateUserPoints(user.id, 5);
-        success("Sucesso!", "Desafio Semanal concluído com sucesso! Você ganhou 5 pontos!")
+        await updateUserPoints(user.id, 5, "weekly_challenge", "Desafio semanal completado");
+        onTaskComplete(5); // Chama a função para mostrar o modal de feedback
+      } else if (challengeType === "parents") {
+        await updateUserPoints(user.id, 10, "family_challenge", "Desafio familiar completado");
+        onTaskComplete(10); // Chama a função para mostrar o modal de feedback
       }
-      
-      setTimeout(() => {
-        router.back()
-      }, 1500) // Pequeno delay para o usuário ver a mensagem de sucesso
     } catch (error) {
-      console.error("Erro ao concluir desafio:", error)
       // Show an error alert
       error2("Erro", "Não foi possível concluir o desafio. Tente novamente mais tarde.")
     } finally {
@@ -267,18 +436,12 @@ const ChallengeDetailScreen = () => {
     }
   }
 
-  // Efeito para verificar se o ViewShot está disponível
-  useEffect(() => {
-    if (viewShotRef.current) {
-      console.log("ViewShot ref está disponível")
-    } else {
-      console.log("ViewShot ref não está disponível")
-    }
-  }, [])
-
   useEffect(() => {
     // Limpa o campo de resposta sempre que o challengeId mudar
     setResponseText("");
+    setResponseText2("");
+    setPaths([]);
+    setPaths2([]);
   }, [challengeId]);
 
   return (
@@ -297,11 +460,76 @@ const ChallengeDetailScreen = () => {
             <View style={styles.challengeTitleContainer}>
               <Text style={styles.challengeTitle}>{challengeTitle}</Text>
               <Text style={styles.challengeType}>
-                {challengeType === "daily" ? "Desafio Diário" : "Desafio Semanal"}
+                {(() => {
+                  switch (challengeType) {
+                    case "daily":
+                      return "Desafio Diário";
+                    case "weekly":
+                      return "Desafio Semanal";
+                    case "parents":
+                      return "Desafio Familiar";
+                    default:
+                      return "Desafio";
+                  }
+                })()}
               </Text>
             </View>
             <View style={styles.characterContainer}>
-              <Text style={styles.characterEmoji}>{challengeCharacter}</Text>
+              {Platform.OS === "web" && challengeCharacter === "Amy" ? (
+                <img
+                  src={charactersImages[0].image}
+                  alt=""
+                  style={styles.avatar}
+                />
+              ) : challengeCharacter === "Amy" && (
+                <Image
+                  source={{ uri: charactersImages[0].image }}
+                  style={styles.avatar}
+                  resizeMode="contain"
+                />
+              )}
+
+              {Platform.OS === "web" && challengeCharacter === "Angelita" ? (
+                <img
+                  src={charactersImages[1].image}
+                  alt=""
+                  style={styles.avatar}
+                />
+              ) : challengeCharacter === "Angelita" && (
+                <Image
+                  source={{ uri: charactersImages[1].image }}
+                  style={styles.avatar}
+                  resizeMode="contain"
+                />
+              )}
+
+              {Platform.OS === "web" && challengeCharacter === "Grãozinho" ? (
+                <img
+                  src={charactersImages[2].image}
+                  alt=""
+                  style={styles.avatar}
+                />
+              ) : challengeCharacter === "Grãozinho" && (
+                <Image
+                  source={{ uri: charactersImages[2].image }}
+                  style={styles.avatar}
+                  resizeMode="contain"
+                />
+              )}
+
+              {Platform.OS === "web" && challengeCharacter === "Lili" ? (
+                <img
+                  src={charactersImages[3].image}
+                  alt=""
+                  style={styles.avatar}
+                />
+              ) : challengeCharacter === "Lili" && (
+                <Image
+                  source={{ uri: charactersImages[3].image }}
+                  style={styles.avatar}
+                  resizeMode="contain"
+                />
+              )}
             </View>
           </View>
 
@@ -309,7 +537,10 @@ const ChallengeDetailScreen = () => {
 
           {allowsDrawing ? (
             <View style={styles.drawingSection}>
-              <Text style={styles.sectionTitle}>Desenhe sua resposta:</Text>
+              {/* Desenho da criança */}
+              <Text style={styles.sectionTitle}>
+                {isParentChallenge ? "Desenho da Criança:" : "Desenhe sua resposta:"}
+              </Text>
 
               <View style={styles.drawingTools}>
                 <View style={styles.colorPicker}>
@@ -319,9 +550,12 @@ const ChallengeDetailScreen = () => {
                       style={[
                         styles.colorOption,
                         { backgroundColor: color },
-                        currentColor === color && styles.selectedColorOption,
+                        activeDrawingCanvas === 1 && currentColor === color && styles.selectedColorOption,
                       ]}
-                      onPress={() => setCurrentColor(color)}
+                      onPress={() => {
+                        setCurrentColor(color);
+                        setActiveDrawingCanvas(1);
+                      }}
                     />
                   ))}
                 </View>
@@ -332,9 +566,12 @@ const ChallengeDetailScreen = () => {
                       key={width}
                       style={[
                         styles.strokeWidthOption,
-                        currentStrokeWidth === width && styles.selectedStrokeWidthOption,
+                        activeDrawingCanvas === 1 && currentStrokeWidth === width && styles.selectedStrokeWidthOption,
                       ]}
-                      onPress={() => setCurrentStrokeWidth(width)}
+                      onPress={() => {
+                        setCurrentStrokeWidth(width);
+                        setActiveDrawingCanvas(1);
+                      }}
                     >
                       <View
                         style={{
@@ -349,16 +586,25 @@ const ChallengeDetailScreen = () => {
                 </View>
               </View>
 
-              <TouchableOpacity style={styles.clearButton} onPress={clearDrawing}>
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={clearDrawing}
+              >
                 <Text style={styles.clearButtonText}>Limpar</Text>
               </TouchableOpacity>
 
               <ViewShot
                 ref={viewShotRef}
                 options={{ format: "png", quality: 1 }}
-                style={[styles.viewShotContainer, { marginBottom: 16 }]} // Adiciona espaçamento inferior
+                style={[styles.viewShotContainer, { marginBottom: 16 }]}
               >
-                <View style={styles.drawingCanvas}>
+                <View
+                  style={[
+                    styles.drawingCanvas,
+                    activeDrawingCanvas === 1 && styles.activeDrawingCanvas
+                  ]}
+                  onTouchStart={() => setActiveDrawingCanvas(1)}
+                >
                   <PanGestureHandler onGestureEvent={onGestureStateChange} onHandlerStateChange={onGestureStateChange}>
                     <Svg height="100%" width="100%" style={styles.svgCanvas}>
                       {paths.map((pathData, index) => (
@@ -378,8 +624,100 @@ const ChallengeDetailScreen = () => {
                 </View>
               </ViewShot>
 
+              {/* Desenho dos pais (apenas para desafios de pais) */}
+              {isParentChallenge && (
+                <>
+                  <Text style={styles.sectionTitle}>Desenho dos Pais:</Text>
+
+                  <View style={styles.drawingTools}>
+                    <View style={styles.colorPicker}>
+                      {colors.map((color) => (
+                        <TouchableOpacity
+                          key={color}
+                          style={[
+                            styles.colorOption,
+                            { backgroundColor: color },
+                            activeDrawingCanvas === 2 && currentColor2 === color && styles.selectedColorOption,
+                          ]}
+                          onPress={() => {
+                            setCurrentColor2(color);
+                            setActiveDrawingCanvas(2);
+                          }}
+                        />
+                      ))}
+                    </View>
+
+                    <View style={styles.strokeWidthPicker}>
+                      {strokeWidths.map((width) => (
+                        <TouchableOpacity
+                          key={width}
+                          style={[
+                            styles.strokeWidthOption,
+                            activeDrawingCanvas === 2 && currentStrokeWidth2 === width && styles.selectedStrokeWidthOption,
+                          ]}
+                          onPress={() => {
+                            setCurrentStrokeWidth2(width);
+                            setActiveDrawingCanvas(2);
+                          }}
+                        >
+                          <View
+                            style={{
+                              width: width * 2,
+                              height: width,
+                              backgroundColor: "#000",
+                              borderRadius: width / 2,
+                            }}
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.clearButton}
+                    onPress={clearDrawing2}
+                  >
+                    <Text style={styles.clearButtonText}>Limpar</Text>
+                  </TouchableOpacity>
+
+                  <ViewShot
+                    ref={viewShotRef2}
+                    options={{ format: "png", quality: 1 }}
+                    style={[styles.viewShotContainer, { marginBottom: 16 }]}
+                  >
+                    <View
+                      style={[
+                        styles.drawingCanvas,
+                        activeDrawingCanvas === 2 && styles.activeDrawingCanvas
+                      ]}
+                      onTouchStart={() => setActiveDrawingCanvas(2)}
+                    >
+                      <PanGestureHandler onGestureEvent={onGestureStateChange2} onHandlerStateChange={onGestureStateChange2}>
+                        <Svg height="100%" width="100%" style={styles.svgCanvas}>
+                          {paths2.map((pathData, index) => (
+                            <Path
+                              key={index}
+                              d={pathData.path}
+                              stroke={pathData.color}
+                              strokeWidth={pathData.strokeWidth}
+                              fill="none"
+                            />
+                          ))}
+                          {currentPath2 ? (
+                            <Path d={currentPath2} stroke={currentColor2} strokeWidth={currentStrokeWidth2} fill="none" />
+                          ) : null}
+                        </Svg>
+                      </PanGestureHandler>
+                    </View>
+                  </ViewShot>
+                </>
+              )}
+
+              {/* Resposta em texto da criança */}
               <View style={styles.responseSection}>
-                <Text style={styles.sectionTitle}>Escreva sua resposta:</Text>
+                <Text style={styles.sectionTitle}>
+                  {isParentChallenge ? "Resposta da Criança:" : "Escreva sua resposta:"}
+                </Text>
                 <TextInput
                   style={styles.responseInput}
                   multiline
@@ -391,6 +729,22 @@ const ChallengeDetailScreen = () => {
                 />
               </View>
 
+              {/* Resposta em texto dos pais (apenas para desafios de pais) */}
+              {isParentChallenge && (
+                <View style={styles.responseSection}>
+                  <Text style={styles.sectionTitle}>Resposta dos Pais:</Text>
+                  <TextInput
+                    style={styles.responseInput}
+                    multiline
+                    placeholder="Digite a resposta dos pais aqui..."
+                    placeholderTextColor="#5c5e61"
+                    value={responseText2}
+                    onChangeText={setResponseText2}
+                    textAlignVertical="top"
+                  />
+                </View>
+              )}
+
               {/* Indicador de progresso de upload */}
               {uploadProgress > 0 && uploadProgress < 100 && (
                 <View style={styles.progressContainer}>
@@ -400,18 +754,39 @@ const ChallengeDetailScreen = () => {
               )}
             </View>
           ) : (
-            <View style={styles.responseSection}>
-              <Text style={styles.sectionTitle}>Sua resposta:</Text>
-              <TextInput
-                style={styles.responseInput}
-                multiline
-                placeholder="Digite sua resposta aqui..."
-                placeholderTextColor="#5c5e61"
-                value={responseText}
-                onChangeText={setResponseText}
-                textAlignVertical="top"
-              />
-            </View>
+            <>
+              {/* Resposta em texto da criança para desafios sem desenho */}
+              <View style={styles.responseSection}>
+                <Text style={styles.sectionTitle}>
+                  {isParentChallenge ? "Resposta da Criança:" : "Sua resposta:"}
+                </Text>
+                <TextInput
+                  style={styles.responseInput}
+                  multiline
+                  placeholder="Digite sua resposta aqui..."
+                  placeholderTextColor="#5c5e61"
+                  value={responseText}
+                  onChangeText={setResponseText}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Resposta em texto dos pais para desafios sem desenho (apenas para desafios de pais) */}
+              {isParentChallenge && (
+                <View style={styles.responseSection}>
+                  <Text style={styles.sectionTitle}>Resposta dos Pais:</Text>
+                  <TextInput
+                    style={styles.responseInput}
+                    multiline
+                    placeholder="Digite a resposta dos pais aqui..."
+                    placeholderTextColor="#5c5e61"
+                    value={responseText2}
+                    onChangeText={setResponseText2}
+                    textAlignVertical="top"
+                  />
+                </View>
+              )}
+            </>
           )}
 
           <TouchableOpacity
@@ -426,6 +801,15 @@ const ChallengeDetailScreen = () => {
             )}
           </TouchableOpacity>
         </ScrollView>
+        {/* Modal de Feedback */}
+        <FeedbackModal
+          visible={modalState.visible}
+          onClose={handleCloseModal}
+          character={modalState.character}
+          message={modalState.message}
+          points={modalState.points}
+          taskType={modalState.taskType}
+        />
       </SafeAreaView>
     </GestureHandlerRootView>
   )
@@ -591,6 +975,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: "hidden",
   },
+  activeDrawingCanvas: {
+    borderColor: "#F163E0",
+    borderWidth: 2,
+  },
   svgCanvas: {
     backgroundColor: "#FFFFFF",
   },
@@ -641,6 +1029,10 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 12,
     lineHeight: 20,
+  },
+    avatar: {
+    width: "100%",
+    height: "100%",
   },
 })
 

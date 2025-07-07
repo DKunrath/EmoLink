@@ -15,6 +15,7 @@ import { Platform } from "react-native"
 import * as Notifications from "expo-notifications"
 import * as BackgroundFetch from "expo-background-fetch"
 import * as TaskManager from "expo-task-manager"
+import { router } from "expo-router"
 
 // Definir uma tarefa em background para notificações aleatórias
 const RANDOM_NOTIFICATION_TASK = "RANDOM_NOTIFICATION_TASK"
@@ -26,7 +27,6 @@ TaskManager.defineTask(RANDOM_NOTIFICATION_TASK, async () => {
     const result = await NotificationManager.sendRandomNotification()
     return result ? BackgroundFetch.BackgroundFetchResult.NewData : BackgroundFetch.BackgroundFetchResult.NoData
   } catch (error) {
-    console.error("Erro na tarefa de notificação em background:", error)
     return BackgroundFetch.BackgroundFetchResult.Failed
   }
 })
@@ -38,10 +38,7 @@ function RootLayoutNav() {
   useEffect(() => {
     const setupNotifications = async () => {
       try {
-        // 1. Registrar para notificações push
-        //await NotificationService.registerForPushNotifications()
-
-        // 2. Configurar categorias de notificação (se necessário)
+        // 1. Configurar categorias de notificação (se necessário)
         if (Platform.OS === "ios") {
           await Notifications.setNotificationCategoryAsync("reminder", [
             {
@@ -53,14 +50,20 @@ function RootLayoutNav() {
             },
           ])
         }
+        else if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("reminder", {
+            name: "Lembrete",
+            importance: Notifications.AndroidImportance.HIGH,
+            sound: "default",
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: theme.colors.primary,
+          })
+        }
 
-        // 3. Carregar e agendar todas as notificações programadas do banco de dados
-        //await NotificationManager.scheduleAllNotifications()
-
-        // 4. Configurar tarefa em background para notificações aleatórias
+        // 2. Configurar tarefa em background para notificações aleatórias
         await registerBackgroundTask()
       } catch (error) {
-        console.error("Erro ao configurar notificações:", error)
+        return false
       }
     }
 
@@ -76,17 +79,14 @@ function RootLayoutNav() {
             stopOnTerminate: false, // Continuar executando quando o app for fechado
             startOnBoot: true, // Iniciar após o dispositivo reiniciar
           })
-
-          console.log("Tarefa de notificações aleatórias registrada com sucesso")
         }
       } catch (error) {
-        console.error("Erro ao registrar tarefa em background:", error)
+        return false
       }
     }
 
     // Configurar listener para quando uma notificação é recebida
     const subscription = Notifications.addNotificationReceivedListener((notification) => {
-      console.log("Notificação recebida:", notification)
     })
 
     // Configurar listener para quando o usuário toca em uma notificação
@@ -120,8 +120,10 @@ function RootLayoutNav() {
       case "open_screen":
         if (data.actionData?.screen) {
           // Navegar para a tela especificada
-          // router.push(data.actionData.screen, data.actionData.params)
-          console.log("Navegando para:", data.actionData.screen, data.actionData.params)
+          if (!user)
+            router.push("/sign-in")
+          else
+          router.push(data.actionData.screen, data.actionData.params)
         }
         break
 
@@ -129,12 +131,11 @@ function RootLayoutNav() {
         if (data.actionData?.url) {
           // Abrir URL
           // Linking.openURL(data.actionData.url)
-          console.log("Abrindo URL:", data.actionData.url)
         }
         break
 
       default:
-        console.log("Tipo de ação desconhecido:", data.actionType)
+        break
     }
   }
   
@@ -165,6 +166,7 @@ function RootLayoutNav() {
           backgroundColor: theme.colors.primary,
         },
         headerTintColor: '#fff',
+        gestureEnabled: false,
       }}
     >
       {!user ? (
@@ -174,12 +176,14 @@ function RootLayoutNav() {
             name="sign-in"
             options={{
               headerShown: false,
+              gestureEnabled: false,
             }}
           />
           <Stack.Screen
             name="sign-up"
             options={{
               headerShown: false,
+              gestureEnabled: false,
             }}
           />
           {/* Outras telas de autenticação */}
@@ -190,6 +194,7 @@ function RootLayoutNav() {
           name="(tabs)"
           options={{
             headerShown: false,
+            gestureEnabled: false,
           }}
         />
       )}

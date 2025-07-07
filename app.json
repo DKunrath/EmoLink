@@ -8,13 +8,34 @@
       "expo-router",
       "expo-asset",
       "react-native-video",
-      "expo-video"
+      "expo-video",
+      "expo-secure-store"
     ],
     "name": "EmoLink",
     "slug": "EmoLink",
+    "icon": "./src/assets/icon.png",
     "android": {
       "newArchEnabled": true,
-      "package": "com.anonymous.EmoLink"
-    }
+      "package": "com.anonymous.EmoLink",
+      "googleServicesFile": "./google-services.json",
+      "permissions": []
+    },
+    "ios": {
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Este aplicativo usa o Face ID para autenticação.",
+        "NSCameraUsageDescription": "Este aplicativo precisa acessar a câmera para capturar fotos.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "br.com.emolink.EmoLink"
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "cc7b4ac5-ceda-437b-86b3-93e2becd4b4f"
+      }
+    },
+    "owner": "dkunrath"
   }
 }

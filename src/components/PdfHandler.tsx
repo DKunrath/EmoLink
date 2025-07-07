@@ -2,9 +2,10 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native"
 import * as FileSystem from "expo-file-system"
 import * as WebBrowser from "expo-web-browser"
+import { useAlertContext } from "../components/alert-provider"
 
 interface PDFHandlerProps {
   pdfUrl: string
@@ -14,6 +15,7 @@ interface PDFHandlerProps {
 const PDFHandler: React.FC<PDFHandlerProps> = ({ pdfUrl, title }) => {
   const [isDownloaded, setIsDownloaded] = useState(false)
   const [localUri, setLocalUri] = useState<string | null>(null)
+  const { error2} = useAlertContext()
 
   // Generate a safe filename from the title
   const getSafeFilename = (title: string) => {
@@ -33,7 +35,8 @@ const PDFHandler: React.FC<PDFHandlerProps> = ({ pdfUrl, title }) => {
           setLocalUri(fileUri)
         }
       } catch (error) {
-        console.error("Error checking file:", error)
+        error2("Erro", "Ocorreu um erro ao verificar o arquivo.")
+        return false
       }
     }
 
@@ -50,7 +53,8 @@ const PDFHandler: React.FC<PDFHandlerProps> = ({ pdfUrl, title }) => {
         await WebBrowser.openBrowserAsync(pdfUrl)
       }
     } catch (error) {
-      console.error("Error opening PDF:", error)
+      error2("Erro", "Ocorreu um erro ao abrir o PDF.")
+      return false
     }
   }
 

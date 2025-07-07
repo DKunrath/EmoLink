@@ -21,18 +21,21 @@ export default function DiaryLayout() {
         name="select"
         options={{
           title: 'Selecionar Emoção',
+          headerBackTitle: "Diário",
         }}
       />
       <Stack.Screen
         name="description"
         options={{
           title: 'Descreva sua Emoção',
+          headerBackTitle: "Selecionar Emoção",
         }}
       />
       <Stack.Screen
         name="intensity"
         options={{
           title: 'Intensidade da Emoção',
+          headerBackTitle: "Descrição",
         }}
       />
     </Stack>

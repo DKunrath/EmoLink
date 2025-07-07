@@ -14,7 +14,6 @@ export const diaryService = {
   async createEntry(
     entry: Omit<EmotionEntry, "id" | "created_at" | "updated_at">
   ) {
-    console.log("Creating entry:", entry);
 
     if (!entry.user_id) {
       throw new Error("user_id is required");
@@ -34,14 +33,11 @@ export const diaryService = {
         .single();
 
       if (error) {
-        console.error("Supabase error:", error);
         throw error;
       }
 
-      console.log("Entry created:", data);
       return data;
     } catch (error) {
-      console.error("Create entry error:", error);
       throw error;
     }
   },
@@ -131,7 +127,6 @@ export const updateUserPoints = async (userId: string, points: number) => {
 
     return newPoints;
   } catch (error) {
-    console.error("Erro ao atualizar pontos do usuário:", error);
     return null;
   }
 };
@@ -165,7 +160,38 @@ export const updateParentPoints = async (userId: string, parent_points: number) 
 
     return newParentPoints;
   } catch (error) {
-    console.error("Erro ao atualizar pontos do usuário:", error);
     return null;
+  }
+};
+
+export const checkUserStoryAlreadyCompleted = async (userId: string, storyId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from("user_stories")
+      .select("completed")
+      .eq("user_id", userId)
+      .eq("story_id", storyId)
+      .single();
+
+    if (error) {
+      return false;
+    }
+    return data?.completed || false;
+  } catch (error) {
+    return false;
+  }
+};
+
+export const updateUserStory = async (userId: string, storyId: string) => {
+  try {
+    const { error } = await supabase
+      .from("user_stories")
+      .insert({ user_id: userId, story_id: storyId, completed: true });
+    if (error) {
+      return false;
+    }
+    return true;
+  } catch (error) {
+    return false;
   }
 };

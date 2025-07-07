@@ -19,6 +19,7 @@ import {
   TouchableWithoutFeedback,
   Image,
   Dimensions,
+  Platform,
 } from "react-native"
 import { useNavigation } from "@react-navigation/native"
 import { supabase } from "../../services/supabase"
@@ -32,13 +33,26 @@ interface Challenge {
   challenge_id: string
   challenge_title: string
   challenge_text: string
-  challenge_type: "daily" | "weekly"
+  challenge_type: "daily" | "weekly" | "parents"
   challenge_character: string
   created_at: string
   allows_drawing: boolean
   completed?: boolean
 }
 
+interface Character {
+  name: string
+  id: string
+  image: string
+}
+
+// Lista de personagens disponíveis
+const characters: Character[] = [
+  { name: "Amy", id: "amy", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Amy.png" },
+  { name: "Angelita", id: "angelita", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Angelita.png" },
+  { name: "Grãozinho", id: "graozinho", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Angelita.png" },
+  { name: "Lili", id: "lili", image: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//image_Angelita.png" },
+]
 // Adicionar interface para respostas de desafios
 interface ChallengeResponse {
   id: string
@@ -46,7 +60,9 @@ interface ChallengeResponse {
   challenge_id: string
   completed_at: string
   answer?: string
+  answer_2?: string
   drawing_url?: string
+  drawing_url_2?: string
   challenge_title?: string
   user_name?: string
 }
@@ -73,6 +89,7 @@ const DOCTOR_ID = "b46ab255-8937-4904-9ba1-3d533027b0d9"
 const ChallengesScreen = () => {
   const [dailyChallenges, setDailyChallenges] = useState<Challenge[]>([])
   const [weeklyChallenges, setWeeklyChallenges] = useState<Challenge[]>([])
+  const [weeklyParentChallenges, setWeeklyParentChallenges] = useState<Challenge[]>([])
   const [loading, setLoading] = useState(true)
   const [completedChallengeIds, setCompletedChallengeIds] = useState<string[]>([])
   const auth = useAuth()
@@ -86,11 +103,12 @@ const ChallengesScreen = () => {
   const [isDoctor, setIsDoctor] = useState(false)
   const [allDailyChallenges, setAllDailyChallenges] = useState<Challenge[]>([])
   const [allWeeklyChallenges, setAllWeeklyChallenges] = useState<Challenge[]>([])
+  const [allWeeklyParentChallenges, setAllWeeklyParentChallenges] = useState<Challenge[]>([])
   const [modalVisible, setModalVisible] = useState(false)
   const [editingChallenge, setEditingChallenge] = useState<Challenge | null>(null)
   const [challengeTitle, setChallengeTitle] = useState("")
   const [challengeText, setChallengeText] = useState("")
-  const [challengeType, setChallengeType] = useState<"daily" | "weekly">("daily")
+  const [challengeType, setChallengeType] = useState<"daily" | "weekly" | "parents">("daily")
   const [challengeCharacter, setChallengeCharacter] = useState("Amy")
   const [allowsDrawing, setAllowsDrawing] = useState(false)
   const [responsesModalVisible, setResponsesModalVisible] = useState(false)
@@ -103,12 +121,15 @@ const ChallengesScreen = () => {
   // Modificar os estados para incluir um modo de visualização no modal de respostas
   const [viewingDrawing, setViewingDrawing] = useState(false)
   const [currentDrawingUrl, setCurrentDrawingUrl] = useState("")
+  const [currentDrawingUrl2, setCurrentDrawingUrl2] = useState("")
 
   // Novos estados para filtros de pesquisa
   const [dailySearchQuery, setDailySearchQuery] = useState("")
   const [weeklySearchQuery, setWeeklySearchQuery] = useState("")
+  const [weeklyParentSearchQuery, setWeeklyParentSearchQuery] = useState("")
   const [filteredDailyChallenges, setFilteredDailyChallenges] = useState<Challenge[]>([])
   const [filteredWeeklyChallenges, setFilteredWeeklyChallenges] = useState<Challenge[]>([])
+  const [filteredWeeklyParentChallenges, setFilteredWeeklyParentChallenges] = useState<Challenge[]>([])
 
   // Obter dimensões da tela para ajustar o tamanho do modal
   const windowWidth = Dimensions.get("window").width
@@ -165,13 +186,27 @@ const ChallengesScreen = () => {
     }
   }, [weeklySearchQuery, allWeeklyChallenges])
 
+  // Efeito para filtrar desafios dos pais quando a pesquisa mudar
+  useEffect(() => {
+    if (allWeeklyParentChallenges.length > 0) {
+      const query = weeklyParentSearchQuery.toLowerCase().trim()
+      if (query === "") {
+        setFilteredWeeklyParentChallenges(allWeeklyParentChallenges)
+      } else {
+        const filtered = allWeeklyParentChallenges.filter((challenge) =>
+          challenge.challenge_title.toLowerCase().includes(query),
+        )
+        setFilteredWeeklyParentChallenges(filtered)
+      }
+    }
+  }, [weeklyParentSearchQuery, allWeeklyParentChallenges])
+
   // Função para buscar desafios
   const fetchChallenges = async () => {
     try {
       setLoading(true)
 
       if (!user) {
-        console.log("Usuário ainda não carregado, tentando novamente em breve...")
         setTimeout(fetchChallenges, 1000) // Tentar novamente em 1 segundo
         return
       }
@@ -201,6 +236,7 @@ const ChallengesScreen = () => {
         // Para pacientes, carregar desafios diários e semanais com lógica específica
         await loadDailyChallenges(completedChallengeIds)
         await loadWeeklyChallenges(completedChallengeIds)
+        await loadWeeklyParentChallenges(completedChallengeIds)
       }
 
       // Animar a entrada dos componentes
@@ -217,9 +253,7 @@ const ChallengesScreen = () => {
         }),
       ]).start()
     } catch (error) {
-      console.error("Erro ao buscar desafios:", error)
       // Tratar o erro silenciosamente sem mostrar o alerta
-      console.log("Continuando a carregar os desafios disponíveis...")
 
       // Garantir que pelo menos alguns desafios sejam exibidos mesmo com erro
       if (dailyChallenges.length === 0) {
@@ -227,6 +261,9 @@ const ChallengesScreen = () => {
       }
       if (weeklyChallenges.length === 0) {
         setWeeklyChallenges([])
+      }
+      if (weeklyParentChallenges.length === 0) {
+        setWeeklyParentChallenges([])
       }
     } finally {
       setLoading(false)
@@ -258,13 +295,26 @@ const ChallengesScreen = () => {
         throw weeklyError
       }
 
+      // Buscar desafios semanais para os pais
+      const { data: weeklyParentData, error: weeklyParentError } = await supabase
+        .from("challenges")
+        .select("*")
+        .eq("challenge_type", "parents")
+        .order("created_at", { ascending: false })
+
+      if (weeklyParentError) {
+        throw weeklyParentError
+      }
+
       setAllDailyChallenges(dailyData || [])
       setFilteredDailyChallenges(dailyData || [])
 
       setAllWeeklyChallenges(weeklyData || [])
       setFilteredWeeklyChallenges(weeklyData || [])
+
+      setAllWeeklyParentChallenges(weeklyParentData || [])
+      setFilteredWeeklyParentChallenges(weeklyParentData || [])
     } catch (error) {
-      console.error("Erro ao carregar desafios para a doutora:", error)
       throw error
     }
   }
@@ -276,7 +326,6 @@ const ChallengesScreen = () => {
       const storedDailyChallenges = await getStoredDailyChallenges()
 
       if (!storedDailyChallenges || shouldUpdateDailyChallenges(storedDailyChallenges.timestamp)) {
-        console.log("Sorteando novos desafios diários...")
 
         // Buscar todos os desafios diários
         const { data: allDailyData, error: dailyError } = await supabase
@@ -290,7 +339,7 @@ const ChallengesScreen = () => {
         }
 
         // Selecionar 2 desafios diários aleatórios
-        const randomDailyChallenges = getRandomChallenges(allDailyData || [], 2)
+        const randomDailyChallenges = getRandomChallenges(allDailyData || [], 2, completedIds);
 
         // Salvar os desafios diários com timestamp
         await storeDailyChallenges({
@@ -305,7 +354,6 @@ const ChallengesScreen = () => {
 
         setDailyChallenges(filteredDailyChallenges)
       } else {
-        console.log("Usando desafios diários armazenados...")
 
         // Filtrar os desafios completados
         const filteredDailyChallenges = storedDailyChallenges.challenges.filter(
@@ -315,7 +363,6 @@ const ChallengesScreen = () => {
         setDailyChallenges(filteredDailyChallenges)
       }
     } catch (error) {
-      console.error("Erro ao carregar desafios diários:", error)
       setDailyChallenges([])
     }
   }
@@ -331,7 +378,6 @@ const ChallengesScreen = () => {
       const storedWeeklyChallenges = await getStoredWeeklyChallenges()
 
       if (!storedWeeklyChallenges || (isMonday && shouldUpdateWeeklyChallenges(storedWeeklyChallenges.timestamp))) {
-        console.log("Sorteando novos desafios semanais...")
 
         // Buscar todos os desafios semanais
         const { data: allWeeklyData, error: weeklyError } = await supabase
@@ -345,7 +391,7 @@ const ChallengesScreen = () => {
         }
 
         // Selecionar 3 desafios semanais aleatórios
-        const randomWeeklyChallenges = getRandomChallenges(allWeeklyData || [], 3)
+        const randomWeeklyChallenges = getRandomChallenges(allWeeklyData || [], 3, completedIds);
 
         // Salvar os desafios semanais com timestamp
         await storeWeeklyChallenges({
@@ -360,7 +406,6 @@ const ChallengesScreen = () => {
 
         setWeeklyChallenges(filteredWeeklyChallenges)
       } else {
-        console.log("Usando desafios semanais armazenados...")
 
         // Filtrar os desafios completados
         const filteredWeeklyChallenges = storedWeeklyChallenges.challenges.filter(
@@ -370,8 +415,59 @@ const ChallengesScreen = () => {
         setWeeklyChallenges(filteredWeeklyChallenges)
       }
     } catch (error) {
-      console.error("Erro ao carregar desafios semanais:", error)
       setWeeklyChallenges([])
+    }
+  }
+
+  // Função para carregar desafios semanais
+  const loadWeeklyParentChallenges = async (completedIds: string[]) => {
+    try {
+      // Verificar se é segunda-feira
+      const today = new Date()
+      const isMonday = today.getDay() === 1
+
+      // Verificar se já temos desafios semanais armazenados
+      const storedWeeklyParentChallenges = await getStoredWeeklyParentChallenges()
+
+      if (!storedWeeklyParentChallenges || (isMonday && shouldUpdateWeeklyParentChallenges(storedWeeklyParentChallenges.timestamp))) {
+
+        // Buscar todos os desafios semanais par os pais
+        const { data: allWeeklyParentData, error: weeklyParentError } = await supabase
+          .from("challenges")
+          .select("*")
+          .eq("challenge_type", "parents")
+          .order("created_at", { ascending: false })
+
+        if (weeklyParentError) {
+          throw weeklyParentError
+        }
+
+        // Selecionar 1 desafios semanais aleatórios
+        const randomWeeklyParentChallenges = getRandomChallenges(allWeeklyParentData || [], 1, completedIds);
+
+        // Salvar os desafios semanais com timestamp
+        await storeWeeklyParentChallenges({
+          challenges: randomWeeklyParentChallenges,
+          timestamp: new Date().toISOString(),
+        })
+
+        // Filtrar os desafios completados
+        const filteredWeeklyParentChallenges = randomWeeklyParentChallenges.filter(
+          (challenge) => !completedIds.includes(challenge.challenge_id),
+        )
+
+        setWeeklyParentChallenges(filteredWeeklyParentChallenges)
+      } else {
+
+        // Filtrar os desafios completados
+        const filteredWeeklyParentChallenges = storedWeeklyParentChallenges.challenges.filter(
+          (challenge) => !completedIds.includes(challenge.challenge_id),
+        )
+
+        setWeeklyParentChallenges(filteredWeeklyParentChallenges)
+      }
+    } catch (error) {
+      setWeeklyParentChallenges([])
     }
   }
 
@@ -391,19 +487,15 @@ const ChallengesScreen = () => {
         const today = new Date()
         today.setHours(0, 0, 0, 0)
         startDate = today.toISOString()
-        console.log("Filtrando por hoje:", startDate)
       } else if (period === "week") {
         const weekAgo = new Date()
         weekAgo.setDate(weekAgo.getDate() - 7)
         startDate = weekAgo.toISOString()
-        console.log("Filtrando pelos últimos 7 dias:", startDate)
       } else if (period === "month") {
         const monthAgo = new Date()
         monthAgo.setDate(monthAgo.getDate() - 30)
         startDate = monthAgo.toISOString()
-        console.log("Filtrando pelos últimos 30 dias:", startDate)
       } else {
-        console.log("Filtrando por todos os períodos")
       }
 
       // Construir a consulta base
@@ -415,7 +507,9 @@ const ChallengesScreen = () => {
         challenge_id, 
         completed_at, 
         answer, 
+        answer_2,
         drawing_url,
+        drawing_url_2,
         challenges(challenge_title)
       `)
         .order("completed_at", { ascending: false })
@@ -455,7 +549,9 @@ const ChallengesScreen = () => {
             challenge_id: item.challenge_id,
             completed_at: item.completed_at,
             answer: item.answer,
+            answer_2: item.answer_2,
             drawing_url: item.drawing_url,
+            drawing_url_2: item.drawing_url_2,
             challenge_title:
               item.challenges && !Array.isArray(item.challenges)
                 ? (item.challenges as { challenge_title: string }).challenge_title
@@ -479,7 +575,6 @@ const ChallengesScreen = () => {
       setResponsesPage(page + 1)
       setHasMoreResponses(hasMore)
     } catch (error) {
-      console.error("Erro ao buscar respostas de desafios:", error)
       Alert.alert("Erro", "Não foi possível carregar as respostas dos desafios.")
     } finally {
       setLoadingResponses(false)
@@ -603,7 +698,6 @@ const ChallengesScreen = () => {
       resetChallengeForm()
       fetchChallenges() // Recarregar a lista de desafios
     } catch (error) {
-      console.error("Erro ao salvar desafio:", error)
       Alert.alert("Erro", "Não foi possível salvar o desafio. Tente novamente.")
     } finally {
       setLoading(false)
@@ -630,9 +724,11 @@ const ChallengesScreen = () => {
 
         // Verificar e atualizar desafios semanais
         await updateChallengeInFile(userId, getWeeklyChallengesFilePath(userId), challengeId, updatedChallenge)
+
+        // Verificar e atualizar desafios semanais para os pais
+        await updateChallengeInFile(userId, getWeeklyParentChallengesFilePath(userId), challengeId, updatedChallenge)
       }
     } catch (error) {
-      console.error("Erro ao atualizar desafio nos arquivos locais:", error)
     }
   }
 
@@ -671,10 +767,8 @@ const ChallengesScreen = () => {
 
         // Salvar o arquivo atualizado
         await FileSystem.writeAsStringAsync(filePath, JSON.stringify(data))
-        console.log(`Desafio atualizado no arquivo ${filePath} para o usuário ${userId}`)
       }
     } catch (error) {
-      console.error(`Erro ao atualizar desafio no arquivo ${filePath}:`, error)
     }
   }
 
@@ -704,7 +798,6 @@ const ChallengesScreen = () => {
                 Alert.alert("Sucesso", "Desafio excluído com sucesso!")
                 fetchChallenges() // Recarregar a lista de desafios
               } catch (error) {
-                console.error("Erro ao excluir desafio:", error)
                 Alert.alert("Erro", "Não foi possível excluir o desafio. Tente novamente.")
               } finally {
                 setLoading(false)
@@ -714,7 +807,6 @@ const ChallengesScreen = () => {
         ],
       )
     } catch (error) {
-      console.error("Erro ao preparar exclusão do desafio:", error)
       Alert.alert("Erro", "Não foi possível processar a solicitação. Tente novamente.")
     }
   }
@@ -744,6 +836,14 @@ const ChallengesScreen = () => {
 
       if (weeklyError) throw weeklyError
 
+      const { data: weeklyParentChallenges, error: weeklyParentError } = await supabase
+        .from("challenges")
+        .select("*")
+        .eq("challenge_type", "parents")
+        .order("created_at", { ascending: false })
+
+      if (weeklyParentError) throw weeklyParentError
+
       // Para cada usuário, verificar e atualizar seus desafios armazenados
       for (const userObj of users || []) {
         const userId = userObj.user_id
@@ -768,9 +868,17 @@ const ChallengesScreen = () => {
           weeklyChallenges || [],
           "weekly",
         )
+
+        // Verificar e substituir nos desafios semanais para os pais
+        await replaceChallengeInFile(
+          userId,
+          getWeeklyParentChallengesFilePath(userId),
+          challengeId,
+          weeklyParentChallenges || [],
+          "parents",
+        )
       }
     } catch (error) {
-      console.error("Erro ao substituir desafio nos arquivos locais:", error)
     }
   }
 
@@ -780,7 +888,7 @@ const ChallengesScreen = () => {
     filePath: string,
     challengeId: string,
     availableChallenges: Challenge[],
-    challengeType: "daily" | "weekly",
+    challengeType: "daily" | "weekly" | "parents",
   ) => {
     try {
       // Verificar se o arquivo existe
@@ -816,18 +924,15 @@ const ChallengesScreen = () => {
 
           // Salvar o arquivo atualizado
           await FileSystem.writeAsStringAsync(filePath, JSON.stringify(data))
-          console.log(`Desafio substituído no arquivo ${filePath} para o usuário ${userId}`)
         } else {
           // Se não houver desafios elegíveis, remover o desafio excluído
           data.challenges = data.challenges.filter((c) => c.challenge_id !== challengeId)
 
           // Salvar o arquivo atualizado
           await FileSystem.writeAsStringAsync(filePath, JSON.stringify(data))
-          console.log(`Desafio removido do arquivo ${filePath} para o usuário ${userId} (sem substituição disponível)`)
         }
       }
     } catch (error) {
-      console.error(`Erro ao substituir desafio no arquivo ${filePath}:`, error)
     }
   }
 
@@ -838,6 +943,7 @@ const ChallengesScreen = () => {
     setPatientSearchQuery("")
     setViewingDrawing(false)
     setCurrentDrawingUrl("")
+    setCurrentDrawingUrl2("")
     setResponsesModalVisible(true)
     fetchChallengeResponses(true)
   }
@@ -868,6 +974,19 @@ const ChallengesScreen = () => {
     return diffDays >= 7
   }
 
+  // Função para verificar se os desafios semanais devem ser atualizados
+  const shouldUpdateWeeklyParentChallenges = (timestamp: string): boolean => {
+    const today = new Date()
+    const challengeDate = new Date(timestamp)
+
+    // Calcular a diferença em dias
+    const diffTime = Math.abs(today.getTime() - challengeDate.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+    // Atualizar se passaram 7 dias ou mais
+    return diffDays >= 7
+  }
+
   // Função para obter o caminho do arquivo de desafios diários
   const getDailyChallengesFilePath = (userId: string): string => {
     return `${FileSystem.documentDirectory}daily_challenges_${userId}.json`
@@ -878,11 +997,15 @@ const ChallengesScreen = () => {
     return `${FileSystem.documentDirectory}weekly_challenges_${userId}.json`
   }
 
+  // Função para obter o caminho do arquivo de desafios semanais para os pais
+  const getWeeklyParentChallengesFilePath = (userId: string): string => {
+    return `${FileSystem.documentDirectory}weekly_parent_challenges_${userId}.json`
+  }
+
   // Função para armazenar desafios diários usando FileSystem
   const storeDailyChallenges = async (data: StoredChallenges) => {
     try {
       if (!user) {
-        console.log("Usuário não disponível para armazenar desafios diários")
         return false
       }
 
@@ -891,10 +1014,8 @@ const ChallengesScreen = () => {
 
       await FileSystem.writeAsStringAsync(filePath, jsonString)
 
-      console.log("Desafios diários armazenados com sucesso em:", filePath)
       return true
     } catch (error) {
-      console.error("Erro ao armazenar desafios diários:", error)
       return false
     }
   }
@@ -903,7 +1024,6 @@ const ChallengesScreen = () => {
   const getStoredDailyChallenges = async (): Promise<StoredChallenges | null> => {
     try {
       if (!user) {
-        console.log("Usuário não disponível para recuperar desafios diários")
         return null
       }
 
@@ -913,16 +1033,13 @@ const ChallengesScreen = () => {
       const fileInfo = await FileSystem.getInfoAsync(filePath)
 
       if (!fileInfo.exists) {
-        console.log("Arquivo de desafios diários não encontrado:", filePath)
         return null
       }
 
       const jsonString = await FileSystem.readAsStringAsync(filePath)
-      console.log("Desafios diários recuperados com sucesso")
 
       return JSON.parse(jsonString)
     } catch (error) {
-      console.error("Erro ao recuperar desafios diários:", error)
       return null
     }
   }
@@ -931,7 +1048,6 @@ const ChallengesScreen = () => {
   const storeWeeklyChallenges = async (data: StoredChallenges) => {
     try {
       if (!user) {
-        console.log("Usuário não disponível para armazenar desafios semanais")
         return false
       }
 
@@ -940,10 +1056,26 @@ const ChallengesScreen = () => {
 
       await FileSystem.writeAsStringAsync(filePath, jsonString)
 
-      console.log("Desafios semanais armazenados com sucesso em:", filePath)
       return true
     } catch (error) {
-      console.error("Erro ao armazenar desafios semanais:", error)
+      return false
+    }
+  }
+
+  // Função para armazenar desafios semanais usando FileSystem
+  const storeWeeklyParentChallenges = async (data: StoredChallenges) => {
+    try {
+      if (!user) {
+        return false
+      }
+
+      const filePath = getWeeklyParentChallengesFilePath(user.id)
+      const jsonString = JSON.stringify(data)
+
+      await FileSystem.writeAsStringAsync(filePath, jsonString)
+
+      return true
+    } catch (error) {
       return false
     }
   }
@@ -952,7 +1084,6 @@ const ChallengesScreen = () => {
   const getStoredWeeklyChallenges = async (): Promise<StoredChallenges | null> => {
     try {
       if (!user) {
-        console.log("Usuário não disponível para recuperar desafios semanais")
         return null
       }
 
@@ -962,29 +1093,56 @@ const ChallengesScreen = () => {
       const fileInfo = await FileSystem.getInfoAsync(filePath)
 
       if (!fileInfo.exists) {
-        console.log("Arquivo de desafios semanais não encontrado:", filePath)
         return null
       }
 
       const jsonString = await FileSystem.readAsStringAsync(filePath)
-      console.log("Desafios semanais recuperados com sucesso")
 
       return JSON.parse(jsonString)
     } catch (error) {
-      console.error("Erro ao recuperar desafios semanais:", error)
+      return null
+    }
+  }
+
+  // Função para recuperar desafios semanais com os pais armazenados usando FileSystem
+  const getStoredWeeklyParentChallenges = async (): Promise<StoredChallenges | null> => {
+    try {
+      if (!user) {
+        return null
+      }
+
+      const filePath = getWeeklyParentChallengesFilePath(user.id)
+
+      // Verificar se o arquivo existe
+      const fileInfo = await FileSystem.getInfoAsync(filePath)
+
+      if (!fileInfo.exists) {
+        return null
+      }
+
+      const jsonString = await FileSystem.readAsStringAsync(filePath)
+
+      return JSON.parse(jsonString)
+    } catch (error) {
       return null
     }
   }
 
   // Função para selecionar desafios aleatórios
-  const getRandomChallenges = (challenges: Challenge[], count: number): Challenge[] => {
-    if (challenges.length <= count) {
-      return challenges
+  // Modify the getRandomChallenges function to exclude completed challenges
+  const getRandomChallenges = (challenges: Challenge[], count: number, completedIds: string[] = []): Challenge[] => {
+    // First filter out any challenges that have already been completed
+    const availableChallenges = challenges.filter(challenge => !completedIds.includes(challenge.challenge_id));
+
+    // If we don't have enough available challenges, return all available ones
+    if (availableChallenges.length <= count) {
+      return availableChallenges;
     }
 
-    const shuffled = [...challenges].sort(() => 0.5 - Math.random())
-    return shuffled.slice(0, count)
-  }
+    // Otherwise, select random challenges from the available ones
+    const shuffled = [...availableChallenges].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+  };
 
   // Navegar para a tela de detalhes do desafio
   const navigateToChallengeDetail = (challenge: Challenge) => {
@@ -1027,6 +1185,12 @@ const ChallengesScreen = () => {
             <Text style={styles.responseText}>{item.answer}</Text>
           </View>
         )}
+        {item.answer_2 && challengeType === "parents" && (
+          <View style={styles.responseContent}>
+            <Text style={styles.responseLabel}>Resposta Pais:</Text>
+            <Text style={styles.responseText}>{item.answer_2}</Text>
+          </View>
+        )}
         {item.drawing_url && (
           <View style={styles.responseContent}>
             <Text style={styles.responseLabel}>Desenho:</Text>
@@ -1035,6 +1199,21 @@ const ChallengesScreen = () => {
               onPress={() => {
                 // Definir o modo de visualização de desenho
                 setCurrentDrawingUrl(item.drawing_url || "")
+                setViewingDrawing(true)
+              }}
+            >
+              <Text style={styles.viewDrawingButtonText}>Ver desenho</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {item.drawing_url_2 && challengeType === "parents" && (
+          <View style={styles.responseContent}>
+            <Text style={styles.responseLabel}>Desenho Pais:</Text>
+            <TouchableOpacity
+              style={styles.viewDrawingButton}
+              onPress={() => {
+                // Definir o modo de visualização de desenho
+                setCurrentDrawingUrl2(item.drawing_url_2 || "")
                 setViewingDrawing(true)
               }}
             >
@@ -1063,7 +1242,18 @@ const ChallengesScreen = () => {
           <View style={styles.challengeTitleContainer}>
             <Text style={styles.challengeTitle}>{challenge.challenge_title}</Text>
             <Text style={styles.challengeType}>
-              {challenge.challenge_type === "daily" ? "Desafio Diário" : "Desafio Semanal"}
+              {(() => {
+                switch (challenge.challenge_type) {
+                  case "daily":
+                    return "Desafio Diário";
+                  case "weekly":
+                    return "Desafio Semanal";
+                  case "parents":
+                    return "Desafio com os Pais";
+                  default:
+                    return "Desafio";
+                }
+              })()}
             </Text>
           </View>
           <View style={styles.characterContainer}>
@@ -1098,7 +1288,7 @@ const ChallengesScreen = () => {
   }
 
   // Função para renderizar um desafio
-  const renderChallenge = (challenge: Challenge, index: number, type: "daily" | "weekly") => {
+  const renderChallenge = (challenge: Challenge, index: number, type: "daily" | "weekly" | "parents") => {
     const isCompleted = completedChallengeIds.includes(challenge.challenge_id)
 
     return (
@@ -1115,10 +1305,77 @@ const ChallengesScreen = () => {
         <View style={styles.challengeHeader}>
           <View style={styles.challengeTitleContainer}>
             <Text style={styles.challengeTitle}>{challenge.challenge_title}</Text>
-            <Text style={styles.challengeType}>{type === "daily" ? "Desafio Diário" : "Desafio Semanal"}</Text>
+            <Text style={styles.challengeType}>
+              {(() => {
+                switch (type) {
+                  case "daily":
+                    return "Desafio Diário";
+                  case "weekly":
+                    return "Desafio Semanal";
+                  case "parents":
+                    return "Desafio com os Pais";
+                  default:
+                    return "Desafio";
+                }
+              })()}
+            </Text>
           </View>
           <View style={styles.characterContainer}>
-            <Text style={styles.characterEmoji}>{challenge.challenge_character}</Text>
+            {Platform.OS === "web" && challenge.challenge_character === "Amy" ? (
+              <img
+                src={characters[0].image}
+                alt=""
+                style={styles.avatar}
+              />
+            ) : challenge.challenge_character === "Amy" && (
+              <Image
+                source={{ uri: characters[0].image }}
+                style={styles.avatar}
+                resizeMode="contain"
+              />
+            )}
+
+            {Platform.OS === "web" && challenge.challenge_character === "Angelita" ? (
+              <img
+                src={characters[1].image}
+                alt=""
+                style={styles.avatar}
+              />
+            ) : challenge.challenge_character === "Angelita" && (
+              <Image
+                source={{ uri: characters[1].image }}
+                style={styles.avatar}
+                resizeMode="contain"
+              />
+            )}
+
+            {Platform.OS === "web" && challenge.challenge_character === "Grãozinho" ? (
+              <img
+                src={characters[2].image}
+                alt=""
+                style={styles.avatar}
+              />
+            ) : challenge.challenge_character === "Grãozinho" && (
+              <Image
+                source={{ uri: characters[2].image }}
+                style={styles.avatar}
+                resizeMode="contain"
+              />
+            )}
+
+            {Platform.OS === "web" && challenge.challenge_character === "Lili" ? (
+              <img
+                src={characters[3].image}
+                alt=""
+                style={styles.avatar}
+              />
+            ) : challenge.challenge_character === "Lili" && (
+              <Image
+                source={{ uri: characters[3].image }}
+                style={styles.avatar}
+                resizeMode="contain"
+              />
+            )}
           </View>
         </View>
 
@@ -1226,6 +1483,41 @@ const ChallengesScreen = () => {
               filteredWeeklyChallenges.map((challenge, index) => renderDoctorChallengeItem(challenge, index))
             )}
           </View>
+
+          {/* Seção de Desafios Semanais para os pais com filtro de pesquisa */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Desafios Familiares</Text>
+            <Text style={styles.sectionDescription}>
+              Desafios que os pacientes podem completar junto com os pais ao longo da semana.
+            </Text>
+
+            {/* Campo de pesquisa para desafios semanais */}
+            <View style={styles.searchContainer}>
+              <TextInput
+                style={styles.searchInput}
+                value={weeklyParentSearchQuery}
+                onChangeText={setWeeklyParentSearchQuery}
+                placeholder="Buscar desafio semanal com os pais..."
+                placeholderTextColor="#9CA3AF"
+                returnKeyType="search"
+              />
+            </View>
+
+            {filteredWeeklyParentChallenges.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>
+                  {weeklyParentSearchQuery.trim() ? "Nenhum desafio com os pais encontrado" : "Nenhum desafio com os pais cadastrado"}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {weeklyParentSearchQuery.trim()
+                    ? "Tente outro termo de busca."
+                    : 'Clique em "Criar Novo Desafio" para adicionar.'}
+                </Text>
+              </View>
+            ) : (
+              filteredWeeklyParentChallenges.map((challenge, index) => renderDoctorChallengeItem(challenge, index))
+            )}
+          </View>
         </ScrollView>
 
         {/* Modal para criar/editar desafio */}
@@ -1278,6 +1570,15 @@ const ChallengesScreen = () => {
                   >
                     <Text style={[styles.radioText, challengeType === "weekly" && styles.radioTextSelected]}>
                       Semanal
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.radioOption, challengeType === "parents" && styles.radioOptionSelected]}
+                    onPress={() => setChallengeType("parents")}
+                  >
+                    <Text style={[styles.radioText, challengeType === "parents" && styles.radioTextSelected]}>
+                      Com os Pais
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1365,6 +1666,15 @@ const ChallengesScreen = () => {
                   <View style={styles.drawingContainer}>
                     {currentDrawingUrl ? (
                       <Image source={{ uri: currentDrawingUrl }} style={styles.drawingImage} resizeMode="contain" />
+                    ) : (
+                      <View style={styles.drawingPlaceholder}>
+                        <Text style={styles.drawingPlaceholderText}>Não foi possível carregar o desenho</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.drawingContainer}>
+                    {currentDrawingUrl2 ? (
+                      <Image source={{ uri: currentDrawingUrl2 }} style={styles.drawingImage} resizeMode="contain" />
                     ) : (
                       <View style={styles.drawingPlaceholder}>
                         <Text style={styles.drawingPlaceholderText}>Não foi possível carregar o desenho</Text>
@@ -1562,6 +1872,23 @@ const ChallengesScreen = () => {
             </View>
           ) : (
             weeklyChallenges.map((challenge, index) => renderChallenge(challenge, index, "weekly"))
+          )}
+        </View>
+
+        {/* Seção de Desafios Semanais com os Pais */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Desafios Familiares</Text>
+          <Text style={styles.sectionDescription}>
+            Desafios que você pode completar junto com seus pais ao longo da semana.
+          </Text>
+
+          {weeklyParentChallenges.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Você completou todos os desafios semanais com os pais disponíveis!</Text>
+              <Text style={styles.emptySubtext}>Novos desafios serão disponibilizados na próxima segunda-feira.</Text>
+            </View>
+          ) : (
+            weeklyParentChallenges.map((challenge, index) => renderChallenge(challenge, index, "parents"))
           )}
         </View>
 
@@ -2107,6 +2434,10 @@ const styles = StyleSheet.create({
   },
   loadingMore: {
     marginVertical: 16,
+  },
+  avatar: {
+    width: "100%",
+    height: "100%",
   },
 })
 

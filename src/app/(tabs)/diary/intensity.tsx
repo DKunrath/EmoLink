@@ -5,10 +5,14 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import Slider from '@react-native-community/slider';
-import { diaryService, updateUserPoints } from '../../../services/diary';
+import { diaryService } from '../../../services/diary';
+import { updateUserPoints } from '../../../services/pointsService';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useAlertContext } from "../../../components/alert-provider"
 import { supabase } from "../../../services/supabase";
+import FeedbackModal from '../../../components/FeedbackModal';
+import { useFeedbackModal } from '../../../hooks/useFeedbackModal';
+import { Character } from '../../../types/feedback-modal';
 
 const emotions = {
   happy: { label: 'Feliz', icon: '😊', color: '#4ADE80' },
@@ -24,7 +28,9 @@ export default function EmotionIntensity() {
   const [intensity, setIntensity] = useState(50);
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
-  const { success, error2, warning, info } = useAlertContext()
+  const { warning } = useAlertContext()
+
+  const { modalState, showFeedbackModal, hideFeedbackModal } = useFeedbackModal();
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -34,6 +40,62 @@ export default function EmotionIntensity() {
   // Get emotion details
   const emotionType = emotion as keyof typeof emotions;
   const emotionDetails = emotions[emotionType] || emotions.other;
+
+  // Quando a criança completar uma tarefa
+  const onTaskComplete = (points: number) => {
+    // Lista de personagens
+    const characters: Character[] = ['amy', 'angelita', 'graozinho'];
+
+    // Lista de mensagens motivacionais
+    const motivationalMessages = [
+      'Parabéns! Você completou a tarefa com sucesso!',
+      'Ótimo trabalho! Continue assim!',
+      'Você está indo muito bem!',
+      'Incrível! Continue se esforçando!',
+      'Excelente! Você está arrasando!',
+    ];
+
+    // Função para selecionar um item aleatório de uma lista
+    const getRandomCharacter = (list: Character[]) => {
+      return list[Math.floor(Math.random() * list.length)];
+    };
+
+    const getRandomMessage = (list: string[]) => {
+      return list[Math.floor(Math.random() * list.length)];
+    };
+
+    // Selecionar personagem e mensagem aleatórios
+    const randomCharacter = getRandomCharacter(characters);
+
+    if (points === 0) {
+      const randomMessage = "Você já registrou 3 emoções hoje. Mas continue assim! Você está indo muito bem!";
+      // Mostrar o modal de feedback
+      showFeedbackModal(
+        randomCharacter, // personagem aleatório
+        randomMessage, // mensagem motivacional aleatória
+        points, // pontos ganhos
+        'diary' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+      );
+    } else {
+      const randomMessage = getRandomMessage(motivationalMessages);
+
+      // Mostrar o modal de feedback
+      showFeedbackModal(
+        randomCharacter, // personagem aleatório
+        randomMessage, // mensagem motivacional aleatória
+        points, // pontos ganhos
+        'diary' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+      );
+    }
+  };
+
+  const handleCloseModal = () => {
+    hideFeedbackModal();
+    router.replace({
+      pathname: '/(tabs)/diary',
+      params: { refresh: Date.now().toString() }
+    });
+  };
 
   useEffect(() => {
     // Animate content in
@@ -96,24 +158,14 @@ export default function EmotionIntensity() {
         throw diaryError;
       }
 
-      if (diaryData && diaryData.length >= 3) {
+      if (diaryData && diaryData.length > 3) {
         // Se já houver 3 registros no dia, não soma pontos
-        success("Registro salvo com sucesso, mas limite de pontos diários para registro de emoções atingido.");
-        router.replace({
-          pathname: '/(tabs)/diary',
-          params: { refresh: Date.now().toString() }
-        });
-      } else
-      {
-        await updateUserPoints(user.id, 2);
-        success("Sucesso!", "Registro salvo com sucesso. Você ganhou 2 pontos!");
-        router.replace({
-          pathname: '/(tabs)/diary',
-          params: { refresh: Date.now().toString() }
-        });
+        onTaskComplete(0); // Chama a função para mostrar o modal de feedback
+      } else {
+        await updateUserPoints(user.id, 2, 'diary_entry', 'Registro de emoção no diário');
+        onTaskComplete(2); // Chama a função para mostrar o modal de feedback
       }
     } catch (error) {
-      console.error('Error details:', error);
       warning('Erro', 'Falha ao salvar registro. Por favor, tente de novo.');
     } finally {
       setSaving(false);
@@ -220,6 +272,14 @@ export default function EmotionIntensity() {
           </View>
         </View>
       </ScrollView>
+      <FeedbackModal
+        visible={modalState.visible}
+        onClose={handleCloseModal}
+        character={modalState.character}
+        message={modalState.message}
+        points={modalState.points}
+        taskType={modalState.taskType}
+      />
     </SafeAreaView>
   );
 }

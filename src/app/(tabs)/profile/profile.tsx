@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useCallback, useRef } from "react"
 import {
   View,
   Text,
@@ -16,14 +16,19 @@ import {
   Animated,
   Modal,
   Platform,
+  PanResponder,
+  FlatList,
 } from "react-native"
 import { supabase } from "../../../services/supabase"
-import * as Crypto from "expo-crypto"
-import ParentDiary from "./parentDiary"
-import LeaderboardScreen from "./leaderboardScreen"
-import InstructionsScreen from "./InstructionsScreen"
+import * as ImagePicker from "expo-image-picker"
+import { Feather } from "@expo/vector-icons"
 import { useAuth } from "../../../hooks/useAuth"
 import { useAlertContext } from "../../../components/alert-provider"
+import { useFocusEffect } from "@react-navigation/native"
+import { decode } from "base64-arraybuffer"
+import * as FileSystem from "expo-file-system"
+import { PointsHistorySection } from '../../../components/PointsHistorySection';
+//import { Avataars } from 'rn-customize-avatar/avataaars';
 
 interface UserReward {
   id: string
@@ -40,8 +45,16 @@ interface UserReward {
   }
 }
 
-// ID da doutora
-const DOCTOR_ID = "b46ab255-8937-4904-9ba1-3d533027b0d9"
+const profileBackgrounds = [
+  { id: 0, name: "Padrão", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_0.png", requiredPoints: 0 },
+  { id: 1, name: "Encantados", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_1.jpg", requiredPoints: 50 },
+  { id: 2, name: "Minions", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_2.jpg", requiredPoints: 100 },
+  { id: 3, name: "Toy Story", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_3.jpg", requiredPoints: 200 },
+  { id: 5, name: "Branca de Neve", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_4.jpg", requiredPoints: 300 },
+  { id: 6, name: "Branca de Nev", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_4.jpg", requiredPoints: 400 },
+  { id: 7, name: "Branca de Ne", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_4.jpg", requiredPoints: 500 },
+  { id: 8, name: "Branca de N", imageUrl: "https://kcpdeeudnonqrjsppxwz.supabase.co/storage/v1/object/public/images//background_image_4.jpg", requiredPoints: 800 },
+];
 
 // Fetch profile data from Supabase
 const fetchProfileData = async () => {
@@ -56,7 +69,7 @@ const fetchProfileData = async () => {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("full_name, avatar_url, parent_password, points, level")
+      .select("full_name, avatar_url, parent_password, points, level, background_url")
       .eq("user_id", user.id)
       .single()
 
@@ -67,23 +80,25 @@ const fetchProfileData = async () => {
       avatar_url: profile.avatar_url,
       email: user.email,
       has_parent_password: !!profile.parent_password,
-      points: profile.points,
-      level: profile.level,
+      points: profile.points || 0,
+      level: profile.level || 1,
+      background_url: profile.background_url
     }
   } catch (error) {
-    console.error("Error fetching profile data:", error)
     return {
       full_name: "",
       avatar_url: "",
       email: "",
       has_parent_password: false,
       points: 0,
+      level: 1,
+      background_url: profileBackgrounds[0].imageUrl, // Use default background if not set
     }
   }
 }
 
 // Save profile data to Supabase
-const saveProfileData = async (data: { full_name: string; avatar_url: string }) => {
+const saveProfileData = async (data: { full_name: string; avatar_url: string; background_url: string }) => {
   try {
     const user = await supabase.auth.getUser()
     if (!user.data?.user) throw new Error("User not authenticated")
@@ -93,65 +108,47 @@ const saveProfileData = async (data: { full_name: string; avatar_url: string }) 
       .update({
         full_name: data.full_name,
         avatar_url: data.avatar_url,
+        background_url: data.background_url,
       })
       .eq("user_id", user.data.user.id)
 
     if (error) throw error
     return true
   } catch (error) {
-    console.error("Error saving profile data:", error)
     return false
   }
 }
 
-// Hash password using SHA-256
-const hashPassword = async (password: string) => {
-  const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, password)
-  return hash
-}
-
-// Save parent password to Supabase
-const saveParentPassword = async (password: string) => {
+// Add the uriToBase64 function outside the component
+const uriToBase64 = async (uri: string): Promise<string | null> => {
   try {
-    const user = await supabase.auth.getUser()
-    if (!user.data?.user) throw new Error("User not authenticated")
-
-    const hashedPassword = await hashPassword(password)
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        parent_password: hashedPassword,
+    if (Platform.OS === "web") {
+      // For web platform
+      const response = await fetch(uri)
+      const blob = await response.blob()
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          if (typeof reader.result === "string") {
+            // Remove the data:image/jpeg;base64, prefix
+            const base64 = reader.result.split(",")[1]
+            resolve(base64)
+          } else {
+            reject(new Error("Failed to convert to base64"))
+          }
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(blob)
       })
-      .eq("user_id", user.data.user.id)
-
-    if (error) throw error
-    return true
+    } else {
+      // For native platforms
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+      return base64
+    }
   } catch (error) {
-    console.error("Error saving parent password:", error)
-    return false
-  }
-}
-
-// Verify parent password
-const verifyParentPassword = async (password: string) => {
-  try {
-    const user = await supabase.auth.getUser()
-    if (!user.data?.user) throw new Error("User not authenticated")
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("parent_password")
-      .eq("user_id", user.data.user.id)
-      .single()
-
-    if (error) throw error
-
-    const hashedPassword = await hashPassword(password)
-    return data.parent_password === hashedPassword
-  } catch (error) {
-    console.error("Error verifying parent password:", error)
-    return false
+    return null
   }
 }
 
@@ -161,41 +158,145 @@ const ProfileScreen = () => {
   const [email, setEmail] = useState("")
   const [points, setPoints] = useState(0)
   const [level, setLevel] = useState(1)
+  const [backgroundUrl, setBackgroundUrl] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
-  const [hasParentPassword, setHasParentPassword] = useState(false)
-  const [passwordModalVisible, setPasswordModalVisible] = useState(false)
-  const [password, setPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  const [passwordError, setPasswordError] = useState("")
-  const [passwordLoading, setPasswordLoading] = useState(false)
-  const [showParentDiary, setShowParentDiary] = useState(false)
-  const [showLeaderboard, setShowLeaderboard] = useState(false)
-  const [showInstructions, setShowInstructions] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+
+  // New states for image adjustment
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null)
+  const [showImageAdjustment, setShowImageAdjustment] = useState(false)
+  const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 })
+  const [imageScale, setImageScale] = useState(1)
+  const [lastPinchDistance, setLastPinchDistance] = useState(0)
 
   const { user } = useAuth()
   const { success, error2 } = useAlertContext()
-  const [profile, setProfile] = useState(null)
   const [userRewards, setUserRewards] = useState<UserReward[]>([])
   const [selectedReward, setSelectedReward] = useState<UserReward | null>(null)
   const [tooltipVisible, setTooltipVisible] = useState(false)
+  const [selectedBackground, setSelectedBackground] = useState(profileBackgrounds[0]); // Fundo padrão
+  // Add these state variables at the beginning of the ProfileScreen component
+  const [currentBackgroundPage, setCurrentBackgroundPage] = useState(0);
+  const backgroundsPerPage = 6;
 
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0]
   const slideAnim = useState(new Animated.Value(50))[0]
 
-  useEffect(() => {
-    const loadProfile = async () => {
-      setLoading(true)
-      const data = await fetchProfileData()
-      setFullName(data.full_name)
-      setAvatarUrl(data.avatar_url)
-      setEmail(data.email)
-      setHasParentPassword(data.has_parent_password)
-      setPoints(data.points)
-      setLevel(data.level)
-      setLoading(false)
+  const renderBackgroundOptions = () => {
+    // Calculate pagination
+    const totalPages = Math.ceil(profileBackgrounds.length / backgroundsPerPage);
+    const startIndex = currentBackgroundPage * backgroundsPerPage;
+    const endIndex = Math.min(startIndex + backgroundsPerPage, profileBackgrounds.length);
+    const currentBackgrounds = profileBackgrounds.slice(startIndex, endIndex);
+
+    return (
+      <View>
+        <View style={styles.backgroundOptionsContainer}>
+          {currentBackgrounds.map((background) => (
+            <TouchableOpacity
+              key={background.id}
+              style={[
+                styles.backgroundOption,
+                selectedBackground.id === background.id && styles.backgroundOptionSelected,
+              ]}
+              onPress={() => {
+                if (points >= background.requiredPoints) {
+                  setSelectedBackground(background);
+                } else {
+                  Alert.alert(
+                    "Fundo Bloqueado",
+                    `Você precisa de ${background.requiredPoints} pontos para desbloquear este fundo.`
+                  );
+                }
+              }}
+            >
+              <Image source={{ uri: background.imageUrl }} style={styles.backgroundImage} />
+              <Text style={styles.backgroundName}>{background.name}</Text>
+              {points < background.requiredPoints && (
+                <Text style={styles.backgroundLockedText}>Bloqueado</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Pagination controls */}
+        {totalPages > 1 && (
+          <View style={styles.paginationContainer}>
+            <TouchableOpacity
+              style={[styles.paginationButton, currentBackgroundPage === 0 && styles.paginationButtonDisabled]}
+              onPress={() => setCurrentBackgroundPage(prev => Math.max(0, prev - 1))}
+              disabled={currentBackgroundPage === 0}
+            >
+              <Feather name="chevron-left" size={20} color={currentBackgroundPage === 0 ? "#D1D5DB" : "#111827"} />
+            </TouchableOpacity>
+
+            <Text style={styles.paginationText}>
+              {currentBackgroundPage + 1} / {totalPages}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.paginationButton, currentBackgroundPage === totalPages - 1 && styles.paginationButtonDisabled]}
+              onPress={() => setCurrentBackgroundPage(prev => Math.min(totalPages - 1, prev + 1))}
+              disabled={currentBackgroundPage === totalPages - 1}
+            >
+              <Feather name="chevron-right" size={20} color={currentBackgroundPage === totalPages - 1 ? "#D1D5DB" : "#111827"} />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // Pan responder for image adjustment
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderMove: (evt, gestureState) => {
+        // Handle pinch to zoom
+        if (evt.nativeEvent.changedTouches && evt.nativeEvent.changedTouches.length === 2) {
+          const touch1 = evt.nativeEvent.changedTouches[0]
+          const touch2 = evt.nativeEvent.changedTouches[1]
+
+          const distance = Math.sqrt(
+            Math.pow(touch2.pageX - touch1.pageX, 2) + Math.pow(touch2.pageY - touch1.pageY, 2),
+          )
+
+          if (lastPinchDistance) {
+            const change = distance - lastPinchDistance
+            const newScale = Math.max(1, Math.min(3, imageScale + change / 200))
+            setImageScale(newScale)
+          }
+
+          setLastPinchDistance(distance)
+        }
+        // Handle drag to position
+        else {
+          setImagePosition({
+            x: imagePosition.x + gestureState.dx,
+            y: imagePosition.y + gestureState.dy,
+          })
+        }
+      },
+      onPanResponderRelease: () => {
+        setLastPinchDistance(0)
+      },
+    }),
+  ).current
+
+  // Load data when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      const loadAllData = async () => {
+        setLoading(true)
+        await Promise.all([loadProfileData(), fetchUserRewards()])
+        setLoading(false)
+      }
+
+      loadAllData()
 
       // Animate content in
       Animated.parallel([
@@ -210,35 +311,24 @@ const ProfileScreen = () => {
           useNativeDriver: true,
         }),
       ]).start()
-    }
 
-    loadProfile()
-  }, [])
-
-  useEffect(() => {
-    if (user) {
-      fetchProfile()
-      fetchUserRewards()
-    }
-  }, [user])
-
-  const fetchProfile = async () => {
-    try {
-      setLoading(true)
-      if (!user) return
-
-      const { data, error } = await supabase.from("profiles").select("*").eq("user_id", user.id).single()
-
-      if (error) {
-        throw error
+      return () => {
+        // Reset animation values when screen is unfocused
+        fadeAnim.setValue(0)
+        slideAnim.setValue(50)
       }
+    }, [user]),
+  )
 
-      setProfile(data)
-    } catch (error) {
-      console.error("Error fetching profile:", error)
-    } finally {
-      setLoading(false)
-    }
+  const loadProfileData = async () => {
+    const data = await fetchProfileData()
+    setFullName(data.full_name)
+    setAvatarUrl(data.avatar_url)
+    setEmail(data.email)
+    setPoints(data.points)
+    setLevel(data.level)
+    setBackgroundUrl(data.background_url)
+    setSelectedBackground(profileBackgrounds.find(bg => bg.imageUrl === data.background_url) || profileBackgrounds[0]) // Set default background if not found
   }
 
   const fetchUserRewards = async () => {
@@ -287,7 +377,34 @@ const ProfileScreen = () => {
 
       setUserRewards(transformedData)
     } catch (error) {
-      console.error("Error fetching user rewards:", error)
+      return false
+    }
+  }
+
+  // Function to delete existing avatar files for the user
+  const deleteExistingAvatarFiles = async () => {
+    try {
+      if (!user) return
+
+      // List all files in the "avatars/avatars" subfolder
+      const { data, error } = await supabase.storage.from("avatars").list("avatars")
+
+      if (error) {
+        return
+      }
+
+      // Filter files that match the user ID pattern
+      const filesToDelete = data
+        ?.filter((file) => file.name.startsWith(`${user.id}_avatar`))
+        .map((file) => `avatars/${file.name}`) // Include the subfolder path
+
+      if (filesToDelete && filesToDelete.length > 0) {
+        // Delete the filtered files
+        const { error: deleteError } = await supabase.storage.from("avatars").remove(filesToDelete)
+
+      }
+    } catch (error) {
+      return false
     }
   }
 
@@ -365,14 +482,15 @@ const ProfileScreen = () => {
 
   const handleSave = async () => {
     setSaving(true)
-    const success = await saveProfileData({ full_name: fullName, avatar_url: avatarUrl })
+    const success2 = await saveProfileData({ full_name: fullName, avatar_url: avatarUrl, background_url: selectedBackground.imageUrl })
     setSaving(false)
 
-    if (success) {
-      Alert.alert("Sucesso", "Seu perfil foi atualizado com sucesso!")
+    if (success2) {
+      success("Sucesso", "Seu perfil foi atualizado com sucesso!")
       setIsEditing(false)
     } else {
-      Alert.alert("Erro", "Falha ao atualizar o perfil. Por favor, tente novamente.")
+      error2("Erro", "Falha ao atualizar o perfil. Por favor, tente novamente.")
+      setIsEditing(false)
     }
   }
 
@@ -383,79 +501,113 @@ const ProfileScreen = () => {
   const handleCancel = () => {
     // Reset to original values
     fetchProfileData().then((data) => {
-      setFullName(data.full_name)
-      setAvatarUrl(data.avatar_url)
-      setIsEditing(false)
-    })
+      setFullName(data.full_name);
+      setAvatarUrl(data.avatar_url);
+      setBackgroundUrl(data.background_url);
+
+      // Find and set the correct background object based on the URL from the database
+      const originalBackground = profileBackgrounds.find(bg => bg.imageUrl === data.background_url) || profileBackgrounds[0];
+      setSelectedBackground(originalBackground);
+
+      setIsEditing(false);
+    });
   }
 
-  const handleParentAccess = async () => {
-    try{
-      const user = await supabase.auth.getUser()
-      if(user.data.user?.id === DOCTOR_ID) {
-        setShowParentDiary(true)
+  // Step 1: Pick image from gallery
+  const pickImage = async () => {
+    try {
+      // Request permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+
+      if (status !== "granted") {
+        Alert.alert("Permissão necessária", "Precisamos de permissão para acessar sua galeria de fotos.")
         return
-      } else {
-        setPassword("")
-        setConfirmPassword("")
-        setPasswordError("")
-        setPasswordModalVisible(true)
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"], // Substitua MediaTypeOptions.Images por um array
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      })
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Set the selected image URI and show adjustment modal
+        setSelectedImageUri(result.assets[0].uri)
+        // Reset position and scale
+        setImagePosition({ x: 0, y: 0 })
+        setImageScale(1)
+        setShowImageAdjustment(true)
       }
     } catch (error) {
-      console.error("Error fetching user:", error)
+      error2("Erro", "Falha ao selecionar imagem. Tente novamente.")
     }
   }
 
-  const handleRankingAccess = () => {
-    setShowLeaderboard(true)
-  }
-
-  const handleInstructionsAccess = () => {
-    setShowInstructions(true)
-  }
-
-  const handlePasswordSubmit = async () => {
-    // Validate password
-    if (!hasParentPassword && password !== confirmPassword) {
-      setPasswordError("As senhas não coincidem")
+  // Step 2: Upload the adjusted image
+  const uploadAdjustedImage = async () => {
+    if (!selectedImageUri || !user) {
       return
     }
 
-    if (password.length < 6) {
-      setPasswordError("A senha deve ter pelo menos 6 caracteres")
-      return
-    }
-
-    setPasswordLoading(true)
+    setUploadingImage(true)
+    setShowImageAdjustment(false)
 
     try {
-      if (hasParentPassword) {
-        // Verify existing password
-        const isValid = await verifyParentPassword(password)
-        if (isValid) {
-          setPasswordModalVisible(false)
-          setShowParentDiary(true)
+      // Delete existing avatar files first
+      await deleteExistingAvatarFiles()
+
+      // Generate a unique file name
+      const fileName = `${user.id}_avatar_${Date.now()}.png`
+      const filePath = `avatars/${fileName}`
+
+      // Convert URI to base64
+      const base64 = await uriToBase64(selectedImageUri)
+      if (!base64) {
+        throw new Error("Falha ao converter imagem para base64")
+      }
+
+      // Upload to Supabase Storage using base64
+      const { data, error: uploadError } = await supabase.storage.from("avatars").upload(filePath, decode(base64), {
+        contentType: "image/png",
+        upsert: true,
+      })
+
+      if (uploadError) throw uploadError
+
+      // Get the public URL
+      const { data: publicUrlData } = supabase.storage.from("avatars").getPublicUrl(filePath)
+
+      if (publicUrlData) {
+        // Update avatar URL in state and save to database
+        const newAvatarUrl = publicUrlData.publicUrl
+        setAvatarUrl(newAvatarUrl)
+
+        const success2 = await saveProfileData({
+          full_name: fullName,
+          avatar_url: newAvatarUrl,
+          background_url: selectedBackground.imageUrl,
+        })
+
+        if (success2) {
+          success("Sucesso", "Foto de perfil atualizada com sucesso!")
         } else {
-          setPasswordError("Senha incorreta")
-        }
-      } else {
-        // Create new password
-        const success = await saveParentPassword(password)
-        if (success) {
-          setHasParentPassword(true)
-          setPasswordModalVisible(false)
-          setShowParentDiary(true)
-          Alert.alert("Sucesso", "Senha criada com sucesso!")
-        } else {
-          setPasswordError("Erro ao criar senha. Tente novamente.")
+          error2("Erro", "Falha ao atualizar a foto de perfil. Tente novamente.")
         }
       }
     } catch (error) {
-      console.error("Error handling password:", error)
-      setPasswordError("Ocorreu um erro. Tente novamente.")
+      error2("Erro", "Falha ao fazer upload da imagem. Tente novamente.")
     } finally {
-      setPasswordLoading(false)
+      setUploadingImage(false)
+      setSelectedImageUri(null)
     }
+  }
+
+  // Cancel image adjustment
+  const cancelImageAdjustment = () => {
+    setShowImageAdjustment(false)
+    setSelectedImageUri(null)
   }
 
   if (loading) {
@@ -467,71 +619,184 @@ const ProfileScreen = () => {
     )
   }
 
+  const renderHeader = () => (
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <View style={[styles.profileHeader, { backgroundColor: "transparent" }]}>
+        <Image source={{ uri: selectedBackground.imageUrl }} style={styles.profileBackground} />
+        <View style={styles.overlay}>
+          <View style={styles.avatarContainer}>
+            <TouchableOpacity style={styles.avatarWrapper} onPress={pickImage} disabled={uploadingImage}>
+              {avatarUrl ? (
+                <>
+                  <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+                  {uploadingImage && (
+                    <View style={styles.avatarOverlay}>
+                      <ActivityIndicator color="#FFFFFF" />
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarPlaceholderText}>{fullName ? fullName.charAt(0).toUpperCase() : "U"}</Text>
+                </View>
+              )}
+              <View style={styles.editAvatarButton}>
+                <Feather name="camera" size={16} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.profileHeaderFields}>
+        <View style={styles.nameContainer}>
+          <Text style={styles.userName}>{fullName || "Usuário"}</Text>
+          <TouchableOpacity style={styles.editNameButton} onPress={handleEdit}>
+            <Feather name="edit-2" size={16} color="#F163E0" />
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.userEmail}>{user?.email}</Text>
+      </View>
+
+      {isEditing && (
+        <View style={styles.editContainer}>
+          <Text style={styles.editLabel}>Nome</Text>
+          <TextInput
+            style={styles.editInput}
+            value={fullName}
+            onChangeText={setFullName}
+            placeholder="Seu nome"
+            placeholderTextColor="#9CA3AF"
+          />
+
+          {/* Renderizar opções de fundos */}
+          <Text style={styles.sectionTitle}>Escolha seu Fundo</Text>
+          {renderBackgroundOptions()}
+
+          <View style={styles.editButtons}>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel} disabled={saving}>
+              <Text style={styles.cancelButtonText}>Cancelar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+              onPress={handleSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.saveButtonText}>Salvar</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <View style={styles.statsContainer}>
+        <View style={styles.statItem}>
+          <Text style={styles.statValue}>{points || 0}</Text>
+          <Text style={styles.statLabel}>Pontos</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <Text style={styles.statValue}>{userRewards.length}</Text>
+          <Text style={styles.statLabel}>Conquistas</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <Text style={styles.statValue}>{level || 1}</Text>
+          <Text style={styles.statLabel}>Nível</Text>
+        </View>
+      </View>
+
+      {/* <View>
+      <Text style={styles.achievementsTitle}>Avatar</Text>
+      <View style={{ flex: 1 }}>
+        <Avataars backgroundColor="grey" />
+      </View>
+    </View> */}
+
+      {/* Achievements Section */}
+      <View style={styles.achievementsContainer}>
+        <Text style={styles.achievementsTitle}>Conquistas</Text>
+
+        {userRewards.length === 0 ? (
+          <View style={styles.emptyAchievements}>
+            <Text style={styles.emptyText}>
+              Você ainda não possui conquistas. Complete desafios para ganhar emblemas!
+            </Text>
+          </View>
+        ) : (
+          <>
+            {renderAchievementSection("Bronze", bronze, "#CD7F32")}
+            {renderAchievementSection("Prata", silver, "#918C8C")}
+            {renderAchievementSection("Ouro", gold, "#BD9F00")}
+            {renderAchievementSection("Diamante", diamond, "#0EA2C4")}
+          </>
+        )}
+      </View>
+    </ScrollView>
+  )
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-      <View style={styles.profileHeader}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{fullName ? fullName.charAt(0).toUpperCase() : "U"}</Text>
+        <FlatList
+          data={[]} // Use uma lista vazia, pois o conteúdo principal está no cabeçalho
+          renderItem={null} // Nenhum item será renderizado
+          ListHeaderComponent={renderHeader} // Renderiza o conteúdo acima do histórico de pontos
+          ListFooterComponent={<PointsHistorySection />} // Renderiza o histórico de pontos como rodapé
+          contentContainerStyle={styles.scrollContent}
+        />
+
+      {/* Image Adjustment Modal */}
+      <Modal
+        visible={showImageAdjustment}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelImageAdjustment}
+      >
+        <View style={styles.imageAdjustmentOverlay}>
+          <View style={styles.imageAdjustmentContainer}>
+            <Text style={styles.imageAdjustmentTitle}>Ajustar Imagem</Text>
+            <Text style={styles.imageAdjustmentSubtitle}>Arraste para posicionar e use dois dedos para zoom</Text>
+
+            <View style={styles.imageAdjustmentPreview}>
+              <View style={styles.imageAdjustmentFrame} {...panResponder.panHandlers}>
+                {selectedImageUri && (
+                  <View style={styles.imageWrapper}>
+                    <Image
+                      source={{ uri: selectedImageUri }}
+                      style={[
+                        styles.adjustableImage,
+                        {
+                          transform: [
+                            { translateX: imagePosition.x },
+                            { translateY: imagePosition.y },
+                            { scale: imageScale },
+                          ],
+                        },
+                      ]}
+                      resizeMode="contain"
+                    />
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.imageAdjustmentButtons}>
+              <TouchableOpacity style={styles.imageAdjustmentCancelButton} onPress={cancelImageAdjustment}>
+                <Text style={styles.imageAdjustmentCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.imageAdjustmentSaveButton} onPress={uploadAdjustedImage}>
+                <Text style={styles.imageAdjustmentSaveText}>Salvar</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          <Text style={styles.userName}>{fullName || "Usuário"}</Text>
-          <Text style={styles.userEmail}>{user?.email}</Text>
         </View>
-
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{points || 0}</Text>
-            <Text style={styles.statLabel}>Pontos</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{userRewards.length}</Text>
-            <Text style={styles.statLabel}>Conquistas</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{level || 1}</Text>
-            <Text style={styles.statLabel}>Nível</Text>
-          </View>
-        </View>
-
-        {/* Achievements Section */}
-        <View style={styles.achievementsContainer}>
-          <Text style={styles.achievementsTitle}>Conquistas</Text>
-
-          {userRewards.length === 0 ? (
-            <View style={styles.emptyAchievements}>
-              <Text style={styles.emptyText}>
-                Você ainda não possui conquistas. Complete desafios para ganhar emblemas!
-              </Text>
-            </View>
-          ) : (
-            <>
-              {renderAchievementSection("Bronze", bronze, "#CD7F32")}
-              {renderAchievementSection("Prata", silver, "#C0C0C0")}
-              {renderAchievementSection("Ouro", gold, "#FFD700")}
-              {renderAchievementSection("Diamante", diamond, "#B9F2FF")}
-            </>
-          )}
-        </View>
-
-          {/* Ranking Button */}
-          <TouchableOpacity style={styles.rankingButton} onPress={handleRankingAccess}>
-            <Text style={styles.rankingButtonText}>Ranking</Text>
-          </TouchableOpacity>
-
-          {/* Parent Access Button */}
-          <TouchableOpacity style={styles.parentAccessButton} onPress={handleParentAccess}>
-            <Text style={styles.parentAccessButtonText}>Acesso Pais</Text>
-          </TouchableOpacity>
-
-          {/* Instructions Button */}
-          <TouchableOpacity style={styles.instructionsButton} onPress={handleInstructionsAccess}>
-            <Text style={styles.instructionsButtonText}>Instruções</Text>
-          </TouchableOpacity>
-      </ScrollView>
+      </Modal>
 
       {/* Achievement Tooltip Modal */}
       <Modal
@@ -598,94 +863,6 @@ const ProfileScreen = () => {
           </View>
         </TouchableOpacity>
       </Modal>
-
-      {/* Password Modal */}
-      <Modal visible={passwordModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{hasParentPassword ? "Digite sua senha" : "Crie uma senha"}</Text>
-
-            {!hasParentPassword && (
-              <Text style={styles.modalSubtitle}>Esta senha será usada para acessar o diário dos pais</Text>
-            )}
-
-            <TextInput
-              style={styles.passwordInput}
-              value={password}
-              onChangeText={(text) => {
-                setPassword(text)
-                setPasswordError("")
-              }}
-              placeholder="Digite sua senha"
-              placeholderTextColor="#9CA3AF"
-              secureTextEntry
-            />
-
-            {!hasParentPassword && (
-              <TextInput
-                style={styles.passwordInput}
-                value={confirmPassword}
-                onChangeText={(text) => {
-                  setConfirmPassword(text)
-                  setPasswordError("")
-                }}
-                placeholder="Confirme sua senha"
-                placeholderTextColor="#9CA3AF"
-                secureTextEntry
-              />
-            )}
-
-            {passwordError ? <Text style={styles.passwordError}>{passwordError}</Text> : null}
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setPasswordModalVisible(false)}
-                disabled={passwordLoading}
-              >
-                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalSubmitButton, passwordLoading && styles.modalSubmitButtonDisabled]}
-                onPress={handlePasswordSubmit}
-                disabled={passwordLoading}
-              >
-                {passwordLoading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalSubmitButtonText}>{hasParentPassword ? "Entrar" : "Criar Senha"}</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Parent Diary Modal */}
-      <Modal visible={showParentDiary} animationType="slide" onRequestClose={() => setShowParentDiary(false)}>
-        <ParentDiary onClose={() => setShowParentDiary(false)} />
-      </Modal>
-
-      {/* Leaderboard Modal */}
-      <Modal visible={showLeaderboard} animationType="slide" onRequestClose={() => setShowLeaderboard(false)}>
-        <SafeAreaView style={styles.container}>
-          <View style={styles.leaderboardContainer}>
-            <View style={styles.leaderboardHeader}>
-              <Text style={styles.leaderboardTitle}>Ranking</Text>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setShowLeaderboard(false)}>
-                <Text style={styles.closeButtonText}>Fechar</Text>
-              </TouchableOpacity>
-            </View>
-            <LeaderboardScreen />
-          </View>
-        </SafeAreaView>
-      </Modal>
-
-      {/* Instructions Modal */}
-      <Modal visible={showInstructions} animationType="slide" onRequestClose={() => setShowInstructions(false)}>
-        <InstructionsScreen onClose={() => setShowInstructions(false)} />
-      </Modal>
     </SafeAreaView>
   )
 }
@@ -719,10 +896,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 24,
   },
+  profileHeaderFields: {
+    alignItems: "center",
+    marginTop: 24,
+    marginBottom: 24,
+  },
   avatarContainer: {
     marginBottom: 16,
   },
+  avatarWrapper: {
+    position: "relative",
+    width: 100,
+    height: 100,
+  },
   avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#E5E7EB",
+  },
+  avatarPlaceholder: {
     width: 100,
     height: 100,
     borderRadius: 50,
@@ -730,20 +923,83 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: {
+  avatarOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    borderRadius: 50,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarPlaceholderText: {
     fontSize: 40,
     fontWeight: "bold",
     color: "#FFFFFF",
+  },
+  editAvatarButton: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F163E0",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  nameContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
   },
   userName: {
     fontSize: 24,
     fontWeight: "bold",
     color: "#111827",
-    marginBottom: 4,
+    marginRight: 8,
+  },
+  editNameButton: {
+    padding: 4,
   },
   userEmail: {
     fontSize: 16,
     color: "#6B7280",
+  },
+  editContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 1,
+  },
+  editLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6B7280",
+    marginBottom: 8,
+  },
+  editInput: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: "#111827",
+    marginBottom: 16,
+  },
+  editButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
   },
   statsContainer: {
     flexDirection: "row",
@@ -798,15 +1054,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  logoutButton: {
-    backgroundColor: "#EF4444",
-  },
-  logoutButtonText: {
-    color: "#FFFFFF",
-  },
   // Achievements styles
   achievementsContainer: {
-    marginTop: 24,
+    marginTop: 8,
     marginBottom: 24,
   },
   achievementsTitle: {
@@ -884,7 +1134,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   // Tooltip Modal styles
-  tooltipModalOverlay: {
+  modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
@@ -921,8 +1171,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   tooltipImage: {
-    width: 80,
-    height: 80,
+    width: 300,
+    height: 300,
   },
   tooltipPlaceholder: {
     width: 80,
@@ -973,148 +1223,195 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 14,
   },
-  rankingButton: {
-    backgroundColor: "#6366F1",
-    paddingVertical: 14,
+  saveButton: {
+    backgroundColor: "#F163E0",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
     borderRadius: 8,
-    alignItems: "center",
-    marginTop: 24,
+    marginLeft: 8,
   },
-  rankingButtonText: {
+  saveButtonDisabled: {
+    backgroundColor: "#F8BBF0",
+  },
+  saveButtonText: {
     color: "#FFFFFF",
     fontWeight: "600",
-    fontSize: 16,
+    fontSize: 14,
   },
-  parentAccessButton: {
-    backgroundColor: "#F59E0B",
-    paddingVertical: 14,
+  cancelButton: {
+    backgroundColor: "#F3F4F6",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
     borderRadius: 8,
-    alignItems: "center",
-    marginTop: 12,
   },
-  parentAccessButtonText: {
-    color: "#FFFFFF",
+  cancelButtonText: {
+    color: "#6B7280",
     fontWeight: "600",
-    fontSize: 16,
+    fontSize: 14,
   },
-  modalOverlay: {
+  // Image Adjustment Modal Styles
+  imageAdjustmentOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
   },
-  instructionsButton: {
-    backgroundColor: "#10B981",
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: "center",
-    marginTop: 12,
-  },
-  instructionsButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-  modalContent: {
+  imageAdjustmentContainer: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
-    padding: 24,
+    padding: 20,
     width: "100%",
-    maxWidth: 400,
+    maxWidth: 500,
+    alignItems: "center",
   },
-  modalTitle: {
+  imageAdjustmentTitle: {
     fontSize: 20,
     fontWeight: "bold",
     color: "#111827",
     marginBottom: 8,
-    textAlign: "center",
   },
-  modalSubtitle: {
+  imageAdjustmentSubtitle: {
     fontSize: 14,
     color: "#6B7280",
     marginBottom: 20,
     textAlign: "center",
   },
-  passwordInput: {
+  imageAdjustmentPreview: {
+    width: "100%",
+    aspectRatio: 1,
+    marginBottom: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageAdjustmentFrame: {
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "#F163E0",
     backgroundColor: "#F9FAFB",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    padding: 16,
-    fontSize: 16,
-    color: "#111827",
-    marginBottom: 16,
   },
-  passwordError: {
-    color: "#EF4444",
-    marginBottom: 16,
-    fontSize: 14,
+  imageWrapper: {
+    width: "100%",
+    height: "100%",
+    overflow: "hidden",
   },
-  modalButtons: {
+  adjustableImage: {
+    width: "100%",
+    height: "100%",
+  },
+  imageAdjustmentButtons: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 8,
+    width: "100%",
   },
-  modalCancelButton: {
+  imageAdjustmentCancelButton: {
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     borderRadius: 8,
     backgroundColor: "#F3F4F6",
     flex: 1,
     marginRight: 8,
     alignItems: "center",
   },
-  modalCancelButtonText: {
+  imageAdjustmentCancelText: {
     color: "#6B7280",
     fontWeight: "600",
     fontSize: 16,
   },
-  modalSubmitButton: {
+  imageAdjustmentSaveButton: {
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     borderRadius: 8,
     backgroundColor: "#F163E0",
     flex: 1,
     marginLeft: 8,
     alignItems: "center",
   },
-  modalSubmitButtonDisabled: {
-    backgroundColor: "#ED77DF",
-  },
-  modalSubmitButtonText: {
+  imageAdjustmentSaveText: {
     color: "#FFFFFF",
     fontWeight: "600",
     fontSize: 16,
   },
-  // Leaderboard Styles
-  leaderboardContainer: {
+  profileBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    resizeMode: "cover",
+    borderRadius: 10,
+  },
+  overlay: {
     flex: 1,
-    backgroundColor: "#F3F4F6",
-  },
-  leaderboardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     alignItems: "center",
-    padding: 16,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    paddingTop: 50,
   },
-  leaderboardTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#111827",
+  backgroundOptionsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginTop: 16,
   },
-  closeButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: "#F163E0",
+  backgroundOption: {
+    width: 100,
+    height: 120,
+    margin: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
     borderRadius: 8,
+    overflow: "hidden",
   },
-  closeButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "600",
+  backgroundOptionSelected: {
+    borderColor: "#F163E0",
+    borderWidth: 2,
+  },
+  backgroundImage: {
+    width: "100%",
+    height: "70%",
+    resizeMode: "cover",
+  },
+  backgroundName: {
+    fontSize: 12,
+    color: "#111827",
+    marginTop: 4,
+  },
+  backgroundLockedText: {
+    fontSize: 10,
+    color: "#9CA3AF",
+    marginTop: 2,
+  },
+  paginationContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  paginationButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#F9FAFB",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  paginationButtonDisabled: {
+    backgroundColor: "#F3F4F6",
+    borderColor: "#E5E7EB",
+  },
+  paginationText: {
+    fontSize: 14,
+    color: "#111827",
+    marginHorizontal: 12,
+    fontWeight: "500",
   },
 })
 

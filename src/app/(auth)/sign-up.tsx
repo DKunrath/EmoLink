@@ -14,14 +14,24 @@ import {
   Platform,
   ScrollView,
   SafeAreaView,
+  Modal,
 } from "react-native"
 import { router, useNavigation } from "expo-router"
 import { authService } from "../../services/auth"
 import { supabase } from "../../services/supabase"
+import { useAlertContext } from "../../components/alert-provider"
 
 // ID da doutora
 const DOCTOR_ID = "b46ab255-8937-4904-9ba1-3d533027b0d9"
 const WELCOME_MESSAGE = "Olá, como você está?"
+
+// Opções de faixa etária com ícones
+const AGE_GROUPS = [
+  { value: "4 - 6", label: "4 - 6 anos", icon: "🧸" },
+  { value: "7 - 9", label: "7 - 9 anos", icon: "🎨" },
+  { value: "10 - 12", label: "10 - 12 anos", icon: "📚" },
+  { value: "13 - 15", label: "13 - 15 anos", icon: "🎮" },
+]
 
 // Componente de seleção de gênero
 const GenderSelector: React.FC<{ selectedGender: string; onSelect: (gender: string) => void }> = ({
@@ -54,25 +64,63 @@ const GenderSelector: React.FC<{ selectedGender: string; onSelect: (gender: stri
   )
 }
 
-const AgeGroupSelector: React.FC<{ selectedAgeGroup: string; onSelect: (ageGroup: string) => void }> = ({
+// Componente dropdown para seleção de faixa etária
+const AgeGroupDropdown: React.FC<{ selectedAgeGroup: string; onSelect: (ageGroup: string) => void }> = ({
   selectedAgeGroup,
   onSelect,
 }) => {
+  const [isOpen, setIsOpen] = useState(false)
+
+  const selectedOption = AGE_GROUPS.find((group) => group.value === selectedAgeGroup)
+
+  const handleSelect = (value: string) => {
+    onSelect(value)
+    setIsOpen(false)
+  }
+
   return (
-    <View style={styles.genderContainer}>
-      <TouchableOpacity
-        style={[styles.genderOption, selectedAgeGroup === "05 - 10" && styles.genderOptionSelected]}
-        onPress={() => onSelect("05 - 10")}
-      >
-        <Text style={[styles.genderText, selectedAgeGroup === "05 - 10" && styles.genderTextSelected]}>05 - 10</Text>
+    <View style={styles.dropdownContainer}>
+      <TouchableOpacity style={styles.dropdownButton} onPress={() => setIsOpen(true)}>
+        <View style={styles.dropdownButtonContent}>
+          {selectedOption ? (
+            <>
+              <Text style={styles.dropdownIcon}>{selectedOption.icon}</Text>
+              <Text style={styles.dropdownSelectedText}>{selectedOption.label}</Text>
+            </>
+          ) : (
+            <Text style={styles.dropdownPlaceholder}>Selecione a faixa etária</Text>
+          )}
+        </View>
+        <Text style={styles.dropdownArrow}>{isOpen ? "▲" : "▼"}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[styles.genderOption, selectedAgeGroup === "11 - 17" && styles.genderOptionSelected]}
-        onPress={() => onSelect("female")}
-      >
-        <Text style={[styles.genderText, selectedAgeGroup === "11 - 17" && styles.genderTextSelected]}>11 - 17</Text>
-      </TouchableOpacity>
+      <Modal visible={isOpen} transparent animationType="fade" onRequestClose={() => setIsOpen(false)}>
+        <TouchableOpacity style={styles.modalOverlay} onPress={() => setIsOpen(false)}>
+          <View style={styles.dropdownModal}>
+            <View style={styles.dropdownList}>
+              <Text style={styles.dropdownTitle}>Selecione a faixa etária</Text>
+              {AGE_GROUPS.map((group) => (
+                <TouchableOpacity
+                  key={group.value}
+                  style={[styles.dropdownOption, selectedAgeGroup === group.value && styles.dropdownOptionSelected]}
+                  onPress={() => handleSelect(group.value)}
+                >
+                  <Text style={styles.dropdownOptionIcon}>{group.icon}</Text>
+                  <Text
+                    style={[
+                      styles.dropdownOptionText,
+                      selectedAgeGroup === group.value && styles.dropdownOptionTextSelected,
+                    ]}
+                  >
+                    {group.label}
+                  </Text>
+                  {selectedAgeGroup === group.value && <Text style={styles.checkmark}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   )
 }
@@ -86,6 +134,7 @@ export default function SignUp() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const { error2 } = useAlertContext()
 
   const navigation = useNavigation()
 
@@ -129,12 +178,10 @@ export default function SignUp() {
       ])
 
       if (error) {
-        console.error("Erro ao criar registro de usuário:", error)
-        throw new Error("Erro ao criar registro de usuário")
+        error2("Erro!", "Erro ao criar registro de usuário.")
       }
     } catch (error) {
-      console.error("Erro ao criar registro de usuário:", error)
-      throw new Error("Erro ao criar registro de usuário")
+      error2("Erro!", "Erro ao criar registro de usuário.")
     }
   }
 
@@ -151,12 +198,10 @@ export default function SignUp() {
       ])
 
       if (error) {
-        console.error("Erro ao criar perfil:", error)
-        throw new Error("Erro ao criar perfil de usuário")
+        error2("Erro!", "Erro ao criar perfil de usuário.")
       }
     } catch (error) {
-      console.error("Erro ao criar perfil:", error)
-      throw new Error("Erro ao criar perfil de usuário")
+      error2("Erro!", "Erro ao criar perfil de usuário.")
     }
   }
 
@@ -176,12 +221,15 @@ export default function SignUp() {
         .select()
 
       if (chatError || !chatData || chatData.length === 0) {
-        console.error("Erro ao criar chat com a doutora:", chatError)
-        throw new Error("Erro ao criar chat com a doutora")
+        error2("Erro!", "Erro ao criar chat com a doutora.")
       }
 
       // 2. Obter o ID do chat criado
-      const chatId = chatData[0].id
+      const chatId = chatData && chatData.length > 0 ? chatData[0].id : null
+
+      if (!chatId) {
+        error2("Erro!", "Erro ao obter o ID do chat criado.")
+      }
 
       // 3. Criar a primeira mensagem
       const { error: messageError } = await supabase.from("messages").insert([
@@ -193,14 +241,10 @@ export default function SignUp() {
       ])
 
       if (messageError) {
-        console.error("Erro ao criar primeira mensagem:", messageError)
-        throw new Error("Erro ao criar primeira mensagem")
+        error2("Erro!", "Erro ao criar primeira mensagem.")
       }
-
-      console.log("Chat e primeira mensagem criados com sucesso!")
     } catch (error) {
-      console.error("Erro ao configurar chat com a doutora:", error)
-      throw new Error("Erro ao configurar chat com a doutora")
+      error2("Erro!", "Erro ao configurar chat com a doutora.")
     }
   }
 
@@ -268,14 +312,11 @@ export default function SignUp() {
       router.replace("/(tabs)/home")
     } catch (err: any) {
       setError(err?.message || "Ocorreu um erro ao criar a conta!")
-      console.error("Erro detalhado:", err)
 
       // Se o usuário foi criado mas houve falha em alguma etapa, tentar fazer logout
       try {
         await authService.signOut()
-      } catch (logoutErr) {
-        console.error("Erro ao fazer logout após falha:", logoutErr)
-      }
+      } catch (logoutErr) {}
     } finally {
       setLoading(false)
     }
@@ -336,7 +377,7 @@ export default function SignUp() {
 
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>Faixa Etária</Text>
-                <AgeGroupSelector selectedAgeGroup={ageGroup} onSelect={setAgeGroup} />
+                <AgeGroupDropdown selectedAgeGroup={ageGroup} onSelect={setAgeGroup} />
               </View>
 
               <View style={styles.inputContainer}>
@@ -485,6 +526,98 @@ const styles = StyleSheet.create({
     color: "#6366F1",
     fontWeight: "600",
   },
+  // Estilos para o dropdown de faixa etária
+  dropdownContainer: {
+    position: "relative",
+  },
+  dropdownButton: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  dropdownButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  dropdownIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  dropdownSelectedText: {
+    fontSize: 16,
+    color: "#111827",
+  },
+  dropdownPlaceholder: {
+    fontSize: 16,
+    color: "#9CA3AF",
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    color: "#6B7280",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  dropdownModal: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    margin: 20,
+    maxWidth: 300,
+    width: "80%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  dropdownList: {
+    padding: 16,
+  },
+  dropdownTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#111827",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  dropdownOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  dropdownOptionSelected: {
+    backgroundColor: "#F3E8FF",
+  },
+  dropdownOptionIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  dropdownOptionText: {
+    fontSize: 16,
+    color: "#374151",
+    flex: 1,
+  },
+  dropdownOptionTextSelected: {
+    color: "#7C3AED",
+    fontWeight: "600",
+  },
+  checkmark: {
+    fontSize: 16,
+    color: "#7C3AED",
+    fontWeight: "bold",
+  },
   errorContainer: {
     backgroundColor: "#FEF2F2",
     borderWidth: 1,
@@ -524,4 +657,3 @@ const styles = StyleSheet.create({
     color: "#F163E0",
   },
 })
-

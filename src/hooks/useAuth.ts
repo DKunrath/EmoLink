@@ -24,7 +24,6 @@ export function useAuth(): AuthState {
         } = await supabase.auth.getUser()
         setState({ user, loading: false })
       } catch (error) {
-        console.error("Error fetching user:", error)
         setState((prev) => ({ ...prev, loading: false }))
       }
     }

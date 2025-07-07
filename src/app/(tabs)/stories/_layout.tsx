@@ -16,7 +16,8 @@ export default function StoriesLayout() {
         name="index"
         options={{
           headerShown: false,
-          title: 'Stories',
+          title: 'Histórias',
+          headerBackTitle: "Histórias",
         }}
       />
       <Stack.Screen
@@ -24,6 +25,7 @@ export default function StoriesLayout() {
         options={{
           headerShown: true,
           title: 'Páginas da História',
+          headerBackTitle: "Histórias",
         }}
       />
     </Stack>

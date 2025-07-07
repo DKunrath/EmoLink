@@ -21,7 +21,6 @@ export class NotificationService {
   // Register for push notifications
   static async registerForPushNotifications() {
     if (!Device.isDevice) {
-      console.log("Push Notifications are not available on emulators/simulators")
       return null
     }
 
@@ -35,24 +34,21 @@ export class NotificationService {
       }
 
       if (finalStatus !== "granted") {
-        console.log("Failed to get push token for push notification!")
         return null
       }
 
       // Para desenvolvimento, vamos focar apenas em notificações locais
       // e pular a parte de obter um token push
-      console.log("Permissões de notificação concedidas")
-      return "local-notifications-only"
+      //return "local-notifications-only"
 
       // Comentando o código de obtenção de token push que requer projectId
-      // const token = await Notifications.getExpoPushTokenAsync({
-      //   projectId: "seu-project-id-aqui", // Você precisaria fornecer isso
-      // }).then((response) => response.data)
-      //
-      // await this.saveTokenToDatabase(token)
-      // return token
+       const token = await Notifications.getExpoPushTokenAsync({
+         projectId: "cc7b4ac5-ceda-437b-86b3-93e2becd4b4f",
+       }).then((response) => response.data)
+      
+       await this.saveTokenToDatabase(token)
+       return token
     } catch (error) {
-      console.error("Error registering for push notifications:", error)
       return null
     }
   }
@@ -65,17 +61,16 @@ export class NotificationService {
       } = await supabase.auth.getUser()
 
       if (!user) {
-        console.error("No authenticated user found")
         return
       }
 
       const { error } = await supabase.from("profiles").update({ push_token: token }).eq("user_id", user.id)
 
       if (error) {
-        console.error("Error saving push token to database:", error)
+        return
       }
     } catch (error) {
-      console.error("Error in saveTokenToDatabase:", error)
+      return
     }
   }
 
@@ -97,7 +92,7 @@ export class NotificationService {
         trigger: notificationTrigger,
       })
     } catch (error) {
-      console.error("Error scheduling local notification:", error)
+      return
     }
   }
 

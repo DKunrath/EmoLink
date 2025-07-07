@@ -21,7 +21,6 @@ export const profilesService = {
 
       return null; // Retorna null se o perfil não for encontrado
     } catch (error) {
-      console.error('Erro ao buscar perfil:', error);
       throw error;
     }
   },

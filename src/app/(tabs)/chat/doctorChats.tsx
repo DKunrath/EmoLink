@@ -13,6 +13,7 @@ import {
   Dimensions,
   TextInput,
   Modal,
+  Image,
 } from "react-native"
 import { useNavigation, type NavigationProp, useFocusEffect } from "@react-navigation/native"
 import type { RootStackParamList } from "../../../types/RootStackParamList"
@@ -31,6 +32,7 @@ interface Conversation {
   patient_name: string
   unread_count_doctor: number
   unread_count_patient: number
+  avatar_url?: string
 }
 
 const DoctorChats = () => {
@@ -51,6 +53,8 @@ const DoctorChats = () => {
   const [passwordLoading, setPasswordLoading] = useState<boolean>(false)
   const [authenticated, setAuthenticated] = useState<boolean>(false)
 
+  const [doctorAvatar, setDoctorAvatar] = useState<string | null>(null)
+
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0]
   const slideAnim = useState(new Animated.Value(50))[0]
@@ -66,10 +70,14 @@ const DoctorChats = () => {
   useEffect(() => {
     if (user && authenticated) {
       fetchConversations()
+      // Add this line to fetch doctor's avatar
+      if (user.id !== DOCTOR_ID) {
+        fetchDoctorAvatar()
+      }
     }
   }, [user, authenticated])
 
-  // Mostrar o modal de senha e resetar o estado de autenticação quando a tela recebe foco
+  // Modify the useFocusEffect hook to skip password authentication for the doctor
   useFocusEffect(
     React.useCallback(() => {
       // Resetar o estado de autenticação e mostrar o modal de senha
@@ -79,10 +87,16 @@ const DoctorChats = () => {
       setPasswordError("")
 
       if (user) {
-        // Verificar se o usuário tem senha e mostrar o modal
-        checkExistingPassword().then(() => {
-          setPasswordModalVisible(true)
-        })
+        // Se for a doutora, autenticar automaticamente sem pedir senha
+        if (user.id === DOCTOR_ID) {
+          setAuthenticated(true)
+          setPasswordModalVisible(false)
+        } else {
+          // Para usuários normais, verificar se tem senha e mostrar o modal
+          checkExistingPassword().then(() => {
+            setPasswordModalVisible(true)
+          })
+        }
       }
 
       return () => {
@@ -116,7 +130,6 @@ const DoctorChats = () => {
       if (error) throw error
       return true
     } catch (error) {
-      console.error("Error saving parent password:", error)
       return false
     }
   }
@@ -138,7 +151,6 @@ const DoctorChats = () => {
       const hashedPassword = await hashPassword(password)
       return data.parent_password === hashedPassword
     } catch (error) {
-      console.error("Error verifying parent password:", error)
       return false
     }
   }
@@ -160,9 +172,20 @@ const DoctorChats = () => {
       setHasPassword(!!data.parent_password)
       return !!data.parent_password
     } catch (error) {
-      console.error("Erro ao verificar senha existente:", error)
       setHasPassword(false)
       return false
+    }
+  }
+
+  // Fetch doctor's avatar
+  const fetchDoctorAvatar = async () => {
+    try {
+      const { data, error } = await supabase.from("profiles").select("avatar_url").eq("user_id", DOCTOR_ID).single()
+
+      if (error) throw error
+      setDoctorAvatar(data?.avatar_url || null)
+    } catch (error) {
+      console.error("Error fetching doctor avatar:", error)
     }
   }
 
@@ -203,7 +226,6 @@ const DoctorChats = () => {
         }
       }
     } catch (error) {
-      console.error("Erro ao processar senha:", error)
       setPasswordError("Ocorreu um erro. Tente novamente.")
     } finally {
       setPasswordLoading(false)
@@ -229,7 +251,6 @@ const DoctorChats = () => {
       const currentUserId = user?.id
 
       if (!currentUserId) {
-        console.error("User ID not found")
         setLoading(false)
         return
       }
@@ -255,7 +276,6 @@ const DoctorChats = () => {
       const { data: chats, error: chatsError } = await chatsQuery
 
       if (chatsError) {
-        console.error("Error fetching chats:", chatsError)
         setLoading(false)
         return
       }
@@ -266,13 +286,9 @@ const DoctorChats = () => {
           // Buscar o nome do paciente
           const { data: profileData, error: profileError } = await supabase
             .from("profiles")
-            .select("full_name")
+            .select("full_name, avatar_url")
             .eq("user_id", chat.user_id)
             .single()
-
-          if (profileError) {
-            console.error(`Error fetching profile for user ${chat.user_id}:`, profileError)
-          }
 
           return {
             id: chat.id,
@@ -280,6 +296,7 @@ const DoctorChats = () => {
             last_message: chat.last_message || "Sem mensagens",
             updated_at: chat.updated_at,
             patient_name: profileData?.full_name || "Paciente sem nome",
+            avatar_url: profileData?.avatar_url || null,
             unread_count_doctor: chat.unread_count_doctor,
             unread_count_patient: chat.unread_count_patient,
           }
@@ -304,7 +321,6 @@ const DoctorChats = () => {
         }),
       ]).start()
     } catch (error) {
-      console.error("Error in fetchConversations:", error)
       setLoading(false)
     }
   }
@@ -320,13 +336,7 @@ const DoctorChats = () => {
         .from("chats")
         .update({ [columnToReset]: 0 })
         .eq("id", chatId)
-
-      if (error) {
-        console.error("Error resetting unread count:", error)
-      }
-    } catch (error) {
-      console.error("Error in resetUnreadCount:", error)
-    }
+    } catch (error) {}
   }
 
   const renderConversationItem = ({ item, index }: { item: Conversation; index: number }) => {
@@ -353,7 +363,23 @@ const DoctorChats = () => {
         >
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initial}</Text>
+              {user?.id === DOCTOR_ID ? (
+                // Doctor viewing: show patient avatar
+                item.avatar_url ? (
+                  <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>{initial}</Text>
+                  </View>
+                )
+              ) : // Patient viewing: show doctor avatar
+              doctorAvatar ? (
+                <Image source={{ uri: doctorAvatar }} style={styles.avatar} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>D</Text>
+                </View>
+              )}
             </View>
           </View>
           <View style={styles.conversationContent}>

@@ -24,8 +24,12 @@ import { supabase } from "../../../services/supabase"
 import type { RouteProp } from "@react-navigation/native"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import { useAuth } from "../../../hooks/useAuth"
-import { updateUserPoints } from '../../../services/diary';
+import { checkUserStoryAlreadyCompleted, updateUserStory } from '../../../services/diary';
+import { updateUserPoints } from "../../../services/pointsService";
 import { useAlertContext } from "../../../components/alert-provider"
+import FeedbackModal from '../../../components/FeedbackModal';
+import { useFeedbackModal } from '../../../hooks/useFeedbackModal';
+import { Character } from '../../../types/feedback-modal';
 
 // ID da doutora
 const DOCTOR_ID = "b46ab255-8937-4904-9ba1-3d533027b0d9"
@@ -41,6 +45,7 @@ export default function StoryPageScreen() {
   interface RouteParams {
     storyId: string
     useChildContent?: boolean
+    ageSelected?: string
   }
   type StoryPageRouteProp = RouteProp<{ params: RouteParams }, "params">
   const route = useRoute<StoryPageRouteProp>()
@@ -50,7 +55,7 @@ export default function StoryPageScreen() {
   const { user } = useAuth()
   const [isReady, setIsReady] = useState(false)
   const [imageLoading, setImageLoading] = useState(true) // Estado para controlar o carregamento da imagem
-  const { success, error2, warning, info } = useAlertContext()
+  const { error2} = useAlertContext()
 
   // Verificar se o usuário é a doutora
   const isDoctor = user?.id === DOCTOR_ID
@@ -62,6 +67,10 @@ export default function StoryPageScreen() {
     content2?: string
     child_content: string
     child_content2?: string
+    child_content_1?: string
+    child_content_2?: string
+    child_content_3?: string
+    child_content_4?: string
     image_url?: string
     image_url_2?: string
     allows_drawing: boolean
@@ -83,12 +92,85 @@ export default function StoryPageScreen() {
   const [editHint, setEditHint] = useState("")
   const [saving, setSaving] = useState(false)
 
+  const { modalState, showFeedbackModal, hideFeedbackModal } = useFeedbackModal();
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current
   const slideAnim = useRef(new Animated.Value(50)).current
 
   // Animation for page transitions
   const pageTransition = useRef(new Animated.Value(0)).current
+
+  // Quando a criança completar uma tarefa
+    const onTaskComplete = (points: number) => {
+      // Lista de personagens
+      const characters: Character[] = ['amy', 'angelita', 'graozinho'];
+  
+      // Lista de mensagens motivacionais
+      const motivationalMessages = [
+        'Parabéns! Você leu toda a história!',
+        'Fantástico! Você concluiu mais uma história incrível!',
+        'Parabéns! Sua dedicação está fazendo a diferença!',
+        'Excelente trabalho! Continue explorando novas histórias!',
+        'Você é incrível! Cada história lida é um passo para o conhecimento!',
+      ];
+  
+      // Função para selecionar um item aleatório de uma lista
+      const getRandomCharacter = (list: Character[]) => {
+        if(storyId === '6598a360-23cf-4ee8-98d2-3d1f85b4fa93')
+        {
+          return 'amy';
+        } 
+        else if(storyId === 'bcd14c73-67a5-45a9-bc01-79d4e107a4a4')
+        {
+          return 'graozinho';
+        } 
+        else if(storyId === 'd1b64edf-d61a-4bb9-b992-7027254d7a6d')
+        {
+          return 'angelita';
+        } 
+        else if(storyId === '03829424-c217-4854-ad3f-749c408d80b8')
+        {
+          return 'angelita';
+        }
+        else {
+          return list[Math.floor(Math.random() * list.length)];
+        }
+      };
+  
+      const getRandomMessage = (list: string[]) => {
+        return list[Math.floor(Math.random() * list.length)];
+      };
+  
+      // Selecionar personagem e mensagem aleatórios
+      const randomCharacter = getRandomCharacter(characters);
+  
+      if (points === 0) {
+        const randomMessage = "Você já completou essa historia. Continue lendo outras histórias!";
+        // Mostrar o modal de feedback
+        showFeedbackModal(
+          randomCharacter, // personagem aleatório
+          randomMessage, // mensagem motivacional aleatória
+          points, // pontos ganhos
+          'story' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+        );
+      } else {
+        const randomMessage = getRandomMessage(motivationalMessages);
+  
+        // Mostrar o modal de feedback
+        showFeedbackModal(
+          randomCharacter, // personagem aleatório
+          randomMessage, // mensagem motivacional aleatória
+          points, // pontos ganhos
+          'story' // tipo: 'challenge' | 'diary' | 'goal' | 'story'
+        );
+      }
+    };
+
+    const handleCloseModal = () => {
+        hideFeedbackModal();
+        navigation.goBack()
+      };
 
   useEffect(() => {
     const start = async () => {
@@ -122,7 +204,7 @@ export default function StoryPageScreen() {
         .order("page_number", { ascending: true })
 
       if (error) {
-        console.error("Erro ao buscar páginas:", error)
+        return false
       } else {
         setPages(data || [])
 
@@ -141,7 +223,7 @@ export default function StoryPageScreen() {
         ]).start()
       }
     } catch (error) {
-      console.error("Erro em fetchPages:", error)
+      return false
     } finally {
       setLoading(false)
     }
@@ -173,13 +255,18 @@ export default function StoryPageScreen() {
 
   const handleConclude = async () => {
     if (user) {
-      await updateUserPoints(user.id, 5);
+      const alreadyCompleted = await checkUserStoryAlreadyCompleted(user.id, storyId);
+      if (!alreadyCompleted) {
+        await updateUserPoints(user.id, 5, "story_reading", "História lida");
+        await updateUserStory(user.id, storyId);
+        // Show a success alert and navigate back
+        onTaskComplete(5); // Chama a função para mostrar o modal de feedback
+      } else {
+        onTaskComplete(0);
+      }
     } else {
       error2("Erro", "Usuário não autenticado. Não é possível ganhar pontos!");
     }
-    // Show a success alert and navigate back
-    success("Sucesso!", "Você concluiu a história, e ganhou 5 pontos!")
-    navigation.goBack()
   }
 
   const toggleTooltip = () => {
@@ -191,6 +278,8 @@ export default function StoryPageScreen() {
     const currentPageData = pages[currentPage]
     setEditContent(currentPageData.content)
     setEditContent2(currentPageData.content2 || "")
+    setChildContent(currentPageData.child_content)
+    setChildContent2(currentPageData.child_content2 || "")
     setEditImage(currentPageData.image_url || "")
     setEditHint(currentPageData.hint || "")
     setEditModalVisible(true)
@@ -208,6 +297,8 @@ export default function StoryPageScreen() {
         .update({
           content: editContent,
           content2: editContent2 || null,
+          child_content: childContent,
+          child_content2: childContent2 || null,
           image_url: editImage || null,
           hint: editHint || null,
         })
@@ -224,6 +315,8 @@ export default function StoryPageScreen() {
         image_url: editImage || undefined,
         content: editContent,
         content2: editContent2 || undefined,
+        child_content: childContent,
+        child_content2: childContent2 || undefined,
         hint: editHint || undefined,
       }
 
@@ -231,7 +324,6 @@ export default function StoryPageScreen() {
       setEditModalVisible(false)
       Alert.alert("Sucesso", "Página atualizada com sucesso!")
     } catch (error) {
-      console.error("Erro ao atualizar página:", error)
       Alert.alert("Erro", "Não foi possível atualizar a página. Tente novamente.")
     } finally {
       setSaving(false)
@@ -314,12 +406,28 @@ export default function StoryPageScreen() {
 
             <Text style={styles.pageTitle}>{page.title}</Text>
 
-            {!route.params.useChildContent && (
+            {/* {!route.params.useChildContent && (
               <Text style={styles.pageText}>{page.content}</Text>
             )}
 
             {route.params.useChildContent && (
               <Text style={styles.pageText}>{page.child_content}</Text>
+            )} */}
+
+            {route.params.ageSelected === "4 - 6" && (
+              <Text style={styles.pageText}>{page.child_content_1}</Text>
+            )}
+
+            {route.params.ageSelected === "7 - 9" && (
+              <Text style={styles.pageText}>{page.child_content_2}</Text>
+            )}
+
+            {route.params.ageSelected === "10 - 12" && (
+              <Text style={styles.pageText}>{page.child_content_3}</Text>
+            )}
+
+            {route.params.ageSelected === "13 - 15" && (
+              <Text style={styles.pageText}>{page.child_content_4}</Text>
             )}
 
             {page.image_url && currentPage < 4 && storyId === "6598a360-23cf-4ee8-98d2-3d1f85b4fa93" && isReady && (
@@ -349,7 +457,7 @@ export default function StoryPageScreen() {
               </View>
             )}
 
-            {page.image_url && storyId === "bcd14c73-67a5-45a9-bc01-79d4e107a4a4" && isReady && (
+            {page.image_url && storyId !== "6598a360-23cf-4ee8-98d2-3d1f85b4fa93" && isReady && (
               <View style={styles.imageContainer}>
                 {imageLoading && <ActivityIndicator size="large" color="#F163E0" style={styles.imageLoader} />}
                 {Platform.OS === "web" ? (
@@ -438,7 +546,7 @@ export default function StoryPageScreen() {
               </View>
             )}
 
-            {page.content2 !== null && storyId === "bcd14c73-67a5-45a9-bc01-79d4e107a4a4" && isReady && (
+            {page.content2 !== null && storyId !== "6598a360-23cf-4ee8-98d2-3d1f85b4fa93" && isReady && (
               <View style={styles.imageContainer}>
                 {imageLoading && <ActivityIndicator size="large" color="#F163E0" style={styles.imageLoader} />}
                 {Platform.OS === "web" ? (
@@ -496,80 +604,137 @@ export default function StoryPageScreen() {
           animationType="slide"
           onRequestClose={() => setEditModalVisible(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Editar Página</Text>
+          <ScrollView>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Editar Página</Text>
 
-              <Text style={styles.inputLabel}>Conteúdo</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={editContent}
-                onChangeText={setEditContent}
-                placeholder="Conteúdo da página"
-                placeholderTextColor="#9CA3AF"
-                multiline
-                numberOfLines={8}
-                textAlignVertical="top"
-              />
+                <Text style={styles.inputLabel}>Conteúdo</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={editContent}
+                  onChangeText={setEditContent}
+                  placeholder="Conteúdo da página"
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={8}
+                  textAlignVertical="top"
+                />
 
-              <Text style={styles.inputLabel}>Imagem (opcional)</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={editImage}
-                onChangeText={setEditImage}
-                placeholder="Imagem da página..."
-                placeholderTextColor="#9CA3AF"
-                multiline
-                numberOfLines={8}
-                textAlignVertical="top"
-              />
+                <Text style={styles.inputLabel}>Conteúdo 2</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={editContent2}
+                  onChangeText={setEditContent2}
+                  placeholder="Conteúdo 2 da página"
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={8}
+                  textAlignVertical="top"
+                />
 
-              <Text style={styles.inputLabel}>Dica (opcional)</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={editHint}
-                onChangeText={setEditHint}
-                placeholder="Dica para esta página"
-                placeholderTextColor="#9CA3AF"
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
+                <Text style={styles.inputLabel}>Conteúdo Infantil</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={childContent}
+                  onChangeText={setChildContent}
+                  placeholder="Conteúdo infantil da página"
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={8}
+                  textAlignVertical="top"
+                />
 
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => setEditModalVisible(false)}
-                  disabled={saving}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
+                <Text style={styles.inputLabel}>Conteúdo Infantil 2</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={childContent2}
+                  onChangeText={setChildContent2}
+                  placeholder="Conteúdo infantil 2 da página"
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={8}
+                  textAlignVertical="top"
+                />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                  onPress={handleSavePage}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.saveButtonText}>Salvar</Text>
-                  )}
-                </TouchableOpacity>
+                <Text style={styles.inputLabel}>Imagem (opcional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={editImage}
+                  onChangeText={setEditImage}
+                  placeholder="Imagem da página..."
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={8}
+                  textAlignVertical="top"
+                />
+
+                <Text style={styles.inputLabel}>Dica (opcional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={editHint}
+                  onChangeText={setEditHint}
+                  placeholder="Dica para esta página"
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setEditModalVisible(false)}
+                    disabled={saving}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancelar</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                    onPress={handleSavePage}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Salvar</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
+            </View>
+          </ScrollView>
+        </Modal>
+      {/* Modal de Tooltip */}
+      <Modal visible={tooltipVisible} transparent={true} animationType="fade" onRequestClose={toggleTooltip}>
+        <TouchableOpacity style={styles.tooltipModalOverlay} activeOpacity={1} onPress={toggleTooltip}>
+          <View style={styles.tooltipContainer}>
+            <View style={styles.tooltipContent}>
+              <ScrollView 
+                style={styles.tooltipScrollView}
+                contentContainerStyle={styles.tooltipScrollContent}
+                showsVerticalScrollIndicator={true}
+                bounces={false}
+              >
+                <Text style={styles.tooltipText}>{page?.hint || "Sem dica disponível"}</Text>
+              </ScrollView>
+              <TouchableOpacity style={styles.tooltipCloseButton} onPress={toggleTooltip}>
+                <Text style={styles.tooltipCloseText}>Fechar</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-        {/* Modal de Tooltip */}
-        <Modal visible={tooltipVisible} transparent={true} animationType="fade" onRequestClose={toggleTooltip}>
-          <TouchableOpacity style={styles.tooltipModalOverlay} activeOpacity={1} onPress={toggleTooltip}>
-            <View style={styles.tooltipContainer}>
-              <View style={styles.tooltipContent}>
-                <Text style={styles.tooltipText}>{page?.hint || "Sem dica disponível"}</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
+        </TouchableOpacity>
+      </Modal>
+        {/* Modal de Feedback */}
+        <FeedbackModal
+        visible={modalState.visible}
+        onClose={handleCloseModal}
+        character={modalState.character}
+        message={modalState.message}
+        points={modalState.points}
+        taskType={modalState.taskType}
+      />
       </SafeAreaView>
     </GestureHandlerRootView>
   )
@@ -860,30 +1025,52 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 16,
   },
-  tooltipModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
   tooltipContainer: {
-    width: "80%",
-    maxWidth: 300,
-  },
-  tooltipContent: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 16,
-    shadowColor: "#000",
+    width: '80%',
+    height: '80%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowRadius: 4,
     elevation: 5,
   },
+  tooltipContent: {
+    flex: 1,
+    padding: 16,
+  },
+  tooltipScrollView: {
+    flex: 1,
+    marginBottom: 16,
+  },
+  tooltipScrollContent: {
+    paddingBottom: 8,
+  },
   tooltipText: {
-    color: "#FFFFFF",
     fontSize: 16,
-    textAlign: "center",
+    color: '#374151',
     lineHeight: 24,
+    textAlign: 'justify',
+  },
+  tooltipCloseButton: {
+    backgroundColor: '#F163E0',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  tooltipCloseText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  tooltipModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
 })

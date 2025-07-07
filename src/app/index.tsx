@@ -5,7 +5,7 @@ import { StyleSheet } from 'react-native';
 export default function Index() {
   return (
     <GestureHandlerRootView style={styles.container}>
-      <Redirect href="/(auth)/sign-up" />
+      <Redirect href="/(auth)/sign-in" />
     </GestureHandlerRootView>
   );
 }

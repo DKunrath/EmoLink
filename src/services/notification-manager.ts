@@ -16,7 +16,6 @@ export class NotificationManager {
 
       return data || []
     } catch (error) {
-      console.error("Erro ao carregar notificações:", error)
       return []
     }
   }
@@ -25,18 +24,15 @@ export class NotificationManager {
   static async scheduleAllNotifications() {
     // Verificar se as notificações já foram agendadas nesta sessão
     if (this.notificationsScheduled) {
-      console.log("Notificações já foram agendadas nesta sessão. Pulando...")
       return true
     }
 
     try {
       // Primeiro, cancela todas as notificações existentes
       await NotificationService.cancelAllNotifications()
-      console.log("Notificações anteriores canceladas")
 
       // Carrega notificações ativas do banco de dados
       const notifications = await this.loadActiveNotifications()
-      console.log(`Carregadas ${notifications.length} notificações ativas do banco de dados`)
 
       // Agenda cada notificação de acordo com seu tipo
       let scheduledCount = 0
@@ -45,14 +41,11 @@ export class NotificationManager {
         scheduledCount++
       }
 
-      console.log(`Agendadas ${scheduledCount} notificações com sucesso`)
-
       // Marcar que as notificações foram agendadas
       this.notificationsScheduled = true
 
       return true
     } catch (error) {
-      console.error("Erro ao agendar notificações:", error)
       return false
     }
   }
@@ -71,14 +64,11 @@ export class NotificationManager {
         },
       }
 
-      console.log(`Agendando notificação: ${notification.title} (${notification.schedule_type})`)
-
       switch (notification.schedule_type) {
         case "daily":
           // Extrai hora e minuto do scheduled_time (formato "HH:MM")
           const [hour, minute] = notification.scheduled_time.split(":").map(Number)
           await NotificationService.scheduleDailyNotification(notificationData, hour, minute)
-          console.log(`Notificação diária agendada para ${hour}:${minute}`)
           break
 
         case "weekly":
@@ -93,7 +83,6 @@ export class NotificationManager {
                 weeklyHour,
                 weeklyMinute,
               )
-              console.log(`Notificação semanal agendada para dia ${weekday} às ${weeklyHour}:${weeklyMinute}`)
             }
           }
           break
@@ -102,20 +91,18 @@ export class NotificationManager {
           if (notification.scheduled_date) {
             const scheduledDate = new Date(notification.scheduled_date)
             await NotificationService.scheduleNotificationForTime(notificationData, scheduledDate)
-            console.log(`Notificação única agendada para ${scheduledDate.toLocaleString()}`)
           }
           break
 
         case "random":
           // Notificações aleatórias são tratadas separadamente
-          console.log("Notificação aleatória - será enviada pelo sistema de notificações aleatórias")
           break
 
         default:
-          console.warn(`Tipo de agendamento desconhecido: ${notification.schedule_type}`)
+          break
       }
     } catch (error) {
-      console.error(`Erro ao agendar notificação ${notification.id}:`, error)
+      return false
     }
   }
 
@@ -141,8 +128,6 @@ export class NotificationManager {
           break
         }
       }
-
-      console.log(`Enviando notificação aleatória: ${selectedNotification.title}`)
 
       // Envia a notificação selecionada
       await NotificationService.sendImmediateNotification({
@@ -172,7 +157,6 @@ export class NotificationManager {
 
       return true
     } catch (error) {
-      console.error("Erro ao enviar notificação aleatória:", error)
       return false
     }
   }
@@ -191,7 +175,6 @@ export class NotificationManager {
       if (error) throw error
       return true
     } catch (error) {
-      console.error("Erro ao marcar notificação como lida:", error)
       return false
     }
   }
@@ -229,7 +212,6 @@ export class NotificationManager {
       if (error) throw error
       return data || []
     } catch (error) {
-      console.error("Erro ao obter histórico de notificações:", error)
       return []
     }
   }
@@ -237,6 +219,5 @@ export class NotificationManager {
   // Resetar o estado de agendamento (útil para testes)
   static resetScheduleState() {
     this.notificationsScheduled = false
-    console.log("Estado de agendamento de notificações resetado")
   }
 }

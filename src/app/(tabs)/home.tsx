@@ -12,14 +12,15 @@ import {
   Dimensions,
   Image,
   ActivityIndicator,
+  Platform,
 } from "react-native"
-import { authService } from "../../services/auth"
 import { router } from "expo-router"
 import { supabase } from "../../services/supabase"
 import { useAuth } from "../../hooks/useAuth"
 import { LinearGradient } from "expo-linear-gradient"
-import { TestNotificationButton } from "../../components/test-notification-button"
-import { RandomNotificationButton } from "../../components/random-notification-button"
+import StreakModal from "../../components/StreakModal"
+import { useStreakModal } from "../../hooks/useStreakModal"
+import type { Streak } from "../../types/streak-modal"
 
 // Componente para o indicador de streak
 const StreakIndicator = ({ count }: { count: number }) => {
@@ -87,7 +88,51 @@ export default function HomeScreen() {
   const [points, setPoints] = useState<number>(0)
   const [loading, setLoading] = useState<boolean>(true)
 
+  const { modalState, showStreakModal, hideStreakModal } = useStreakModal()
+
   const { user } = useAuth()
+
+  // Quando a criança completar uma tarefa
+  const onCheckComplete = (streak: number) => {
+    // Lista de personagens
+    const streaks: Streak[] = ["3", "7", "30", "180"]
+
+    if (streak === 3) {
+      // Mostrar o modal de feedback
+      showStreakModal(
+        "3", // personagem aleatório
+      )
+    } else if (streak === 7) {
+      // Mostrar o modal de feedback
+      showStreakModal(
+        "7", // personagem aleatório
+      )
+    } else if (streak === 30) {
+      // Mostrar o modal de feedback
+      showStreakModal(
+        "30", // personagem aleatório
+      )
+    } else if (streak === 180) {
+      // Mostrar o modal de feedback
+      showStreakModal(
+        "180", // personagem aleatório
+      )
+    }
+  }
+
+  const handleCloseModal = () => {
+    hideStreakModal()
+  }
+
+  useEffect(() => {
+    if (user) {
+      loadUserData().then(() => {
+        calculateStreak().then(() => {
+          checkStreakCount(streakCount)
+        })
+      })
+    }
+  }, [user])
 
   useEffect(() => {
     // Animate content in
@@ -107,73 +152,55 @@ export default function HomeScreen() {
     // Carregar dados do usuário
     if (user) {
       loadUserData()
-      calculateStreak();
+      calculateStreak()
 
       // Subscription para alterações na tabela emotion_entries
       const emotionEntriesSubscription = supabase
         .channel("emotion_entries_changes")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "emotion_entries" },
-          (payload) => {
-            console.log("Mudança detectada na tabela emotion_entries:", payload);
-            calculateStreak(); // Recalcular o streak
-            updateMoodCount(); // Atualizar o número de registros
-          }
-        )
-        .subscribe();
+        .on("postgres_changes", { event: "*", schema: "public", table: "emotion_entries" }, (payload) => {
+          calculateStreak() // Recalcular o streak
+          updateMoodCount() // Atualizar o número de registros
+        })
+        .subscribe()
 
       // Subscription para alterações na tabela profiles
       const profilesSubscription = supabase
         .channel("profiles_changes")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "profiles" },
-          (payload) => {
-            console.log("Mudança detectada na tabela profiles:", payload);
-            updatePoints(); // Atualizar os pontos
-          }
-        )
-        .subscribe();
+        .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, (payload) => {
+          updatePoints() // Atualizar os pontos
+        })
+        .subscribe()
 
       // Limpar as subscriptions ao desmontar o componente
       return () => {
-        supabase.removeChannel(emotionEntriesSubscription);
-        supabase.removeChannel(profilesSubscription);
-      };
+        supabase.removeChannel(emotionEntriesSubscription)
+        supabase.removeChannel(profilesSubscription)
+      }
     }
-  }, [user]);
+  }, [user])
 
   const updateMoodCount = async () => {
     try {
       const { count, error } = await supabase
         .from("emotion_entries")
         .select("id", { count: "exact" })
-        .eq("user_id", user?.id);
+        .eq("user_id", user?.id)
 
-      if (error) throw error;
+      if (error) throw error
 
-      setMoodCount(count || 0);
-    } catch (error) {
-      console.error("Erro ao atualizar moodCount:", error);
-    }
-  };
+      setMoodCount(count || 0)
+    } catch (error) {}
+  }
 
   const updatePoints = async () => {
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("points")
-        .eq("user_id", user?.id)
-        .single();
+      const { data, error } = await supabase.from("profiles").select("points").eq("user_id", user?.id).single()
 
-      if (error) throw error;
+      if (error) throw error
 
-      setPoints(data?.points || 0);
-    } catch (error) {
-      console.error("Erro ao atualizar points:", error);
-    }
-  };
+      setPoints(data?.points || 0)
+    } catch (error) {}
+  }
 
   // Função para carregar dados do usuário
   const loadUserData = async () => {
@@ -181,10 +208,10 @@ export default function HomeScreen() {
       setLoading(true)
 
       // Atualizar pontos
-      await updatePoints();
+      await updatePoints()
 
       // Atualizar número de registros
-      await updateMoodCount();
+      await updateMoodCount()
 
       // Buscar perfil do usuário
       const { data: profileData, error: profileError } = await supabase
@@ -211,9 +238,15 @@ export default function HomeScreen() {
 
       setMoodCount(count || 0)
     } catch (error) {
-      console.error("Erro ao carregar dados do usuário:", error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Função para verificar o streak e mostrar o modal
+  const checkStreakCount = (streakCount: number) => {
+    if (streakCount >= 3) {
+      onCheckComplete(streakCount)
     }
   }
 
@@ -284,18 +317,11 @@ export default function HomeScreen() {
       }
 
       setStreakCount(currentStreak)
-    } catch (error) {
-      console.error("Erro ao calcular streak:", error)
-      setStreakCount(0)
-    }
-  }
 
-  const handleLogout = async () => {
-    try {
-      await authService.signOut()
-      router.replace("/sign-in")
-    } catch (err: any) {
-      console.error("Erro fazendo logout:", err.message)
+      // Verificar o streak após calcular
+      checkStreakCount(currentStreak)
+    } catch (error) {
+      setStreakCount(0)
     }
   }
 
@@ -335,8 +361,10 @@ export default function HomeScreen() {
             </View>
 
             <TouchableOpacity style={styles.avatarContainer} onPress={() => navigateTo("/(tabs)/profile")}>
-              {userAvatar ? (
-                <Image source={{ uri: userAvatar }} style={styles.avatar} />
+              {Platform.OS === "web" && userAvatar ? (
+                <img src={userAvatar || "/placeholder.svg"} alt="" style={styles.avatar} />
+              ) : Platform.OS !== "web" && userAvatar ? (
+                <Image source={{ uri: userAvatar }} style={styles.avatar} resizeMode="contain" />
               ) : (
                 <View style={styles.avatarPlaceholder}>
                   <Text style={styles.avatarText}>{userName ? userName.charAt(0).toUpperCase() : "U"}</Text>
@@ -416,6 +444,39 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>Atividades</Text>
         </Animated.View>
 
+        {/* Card de Agendamentos */}
+        <Animated.View
+          style={[
+            styles.cardContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: Animated.multiply(slideAnim, 1.5) }],
+            },
+          ]}
+        >
+          <TouchableOpacity style={styles.card} onPress={() => navigateTo("/appointmentsScreen")} activeOpacity={0.8}>
+            <LinearGradient
+              colors={["#F8BBD9", "#F4A6CD"]}
+              style={styles.cardGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.cardContent}>
+                <View style={styles.cardIconContainer}>
+                  <Text style={styles.cardIcon}>📅</Text>
+                </View>
+                <View style={styles.cardTextContent}>
+                  <Text style={styles.cardTitle}>Agendamentos</Text>
+                  <Text style={styles.cardDescription}>Agende consultas com a Doutora ou veja seus agendamentos.</Text>
+                </View>
+                <View style={styles.cardAction}>
+                  <Text style={styles.cardActionText}>Acessar</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+
         <Animated.View
           style={[
             styles.cardContainer,
@@ -437,7 +498,7 @@ export default function HomeScreen() {
                   <Text style={styles.cardIcon}>🏆</Text>
                 </View>
                 <View style={styles.cardTextContent}>
-                  <Text style={styles.cardTitle}>Desafios Diários</Text>
+                  <Text style={styles.cardTitle}>Desafios</Text>
                   <Text style={styles.cardDescription}>Complete desafios para desenvolver habilidades emocionais.</Text>
                 </View>
                 <View style={styles.cardAction}>
@@ -470,7 +531,9 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.cardTextContent}>
                   <Text style={styles.cardTitle}>Recompensas</Text>
-                  <Text style={styles.cardDescription}>Veja e Resgate suas Recompensas dos Desafios Diários e Semanais.</Text>
+                  <Text style={styles.cardDescription}>
+                    Veja e Resgate suas Recompensas dos Desafios Diários e Semanais.
+                  </Text>
                 </View>
                 <View style={styles.cardAction}>
                   <Text style={styles.cardActionText}>Explorar</Text>
@@ -479,21 +542,8 @@ export default function HomeScreen() {
             </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
-
-        <Animated.View
-          style={[
-            styles.logoutContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: Animated.multiply(slideAnim, 1.8) }],
-            },
-          ]}
-        >
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Sair</Text>
-          </TouchableOpacity>
-        </Animated.View>
       </ScrollView>
+      <StreakModal visible={modalState.visible} onClose={handleCloseModal} streak={modalState.streak} />
     </SafeAreaView>
   )
 }
@@ -784,4 +834,3 @@ const styles = StyleSheet.create({
     color: "#4B5563",
   },
 })
-

@@ -35,7 +35,6 @@ export default function DrawingComponent({ storyPageId }: DrawingComponentProps)
     const image = canvasRef.current?.makeImageSnapshot();
     if (image) {
       if (Platform.OS === 'web') {
-        console.log('Drawing saved (web):', `data:image/png;base64,${image.encodeToBase64()}`);
         Alert.alert('Success', 'Drawing saved (web simulation)!');
       } else {
         const uri = `${FileSystem.cacheDirectory}drawing_${storyPageId}.png`;

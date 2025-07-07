@@ -15,11 +15,17 @@ import {
   SafeAreaView,
   TextInput,
   FlatList,
+  Image,
 } from "react-native"
 import { router, useLocalSearchParams } from "expo-router"
 import { useAuth } from "../../../hooks/useAuth"
 import { diaryService, type EmotionEntry } from "../../../services/diary"
 import { supabase } from "../../../services/supabase"
+
+export const options = {
+  headerBackTitle: "Diário",
+  title: "Diário", // opcional, para garantir o título correto
+};
 
 // ID da doutora
 const DOCTOR_ID = "b46ab255-8937-4904-9ba1-3d533027b0d9"
@@ -29,6 +35,7 @@ interface Patient {
   id: string
   full_name: string
   has_entry_today: boolean
+  avatar_url?: string | null
 }
 
 // Componente de tooltip simples
@@ -143,7 +150,6 @@ export default function DiaryScreen() {
       // Retorna true se encontrou alguma entrada
       return data && data.length > 0
     } catch (error) {
-      console.error(`Erro verificando entradas de hoje para usuário ${userId}:`, error)
       return false
     }
   }
@@ -154,7 +160,7 @@ export default function DiaryScreen() {
       setLoading(true)
 
       // Buscar todos os perfis de pacientes
-      const { data, error } = await supabase.from("profiles").select("user_id, full_name").neq("full_name", "Ana Claudia Cavalcanti").order("full_name")
+      const { data, error } = await supabase.from("profiles").select("user_id, full_name, avatar_url").neq("full_name", "Ana Claudia Cavalcanti").order("full_name")
 
       if (error) {
         throw error
@@ -169,6 +175,7 @@ export default function DiaryScreen() {
             id: profile.user_id,
             full_name: profile.full_name,
             has_entry_today: hasEntryToday,
+            avatar_url: profile.avatar_url,
           }
         }),
       )
@@ -176,7 +183,7 @@ export default function DiaryScreen() {
       setPatients(patientsWithEntryStatus)
       setFilteredPatients(patientsWithEntryStatus)
     } catch (error) {
-      console.error("Erro carregando pacientes:", error)
+      return false
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -198,7 +205,7 @@ export default function DiaryScreen() {
       setHasMore(more)
       setPage(currentPage + 1)
     } catch (error) {
-      console.error("Erro carregando entradas:", error)
+      return false
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -298,7 +305,15 @@ export default function DiaryScreen() {
         <TouchableOpacity onPress={() => selectPatient(item.id)} style={styles.patientCard} activeOpacity={0.7}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initial}</Text>
+              {item.avatar_url ? (
+                <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {initial}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
           <View style={styles.patientContent}>
@@ -384,114 +399,114 @@ export default function DiaryScreen() {
   // Tela de diário (para pacientes ou doutora visualizando um paciente específico)
   return (
     <SafeAreaView style={styles.container}>
-    <View style={styles.container}>
-      <View style={styles.header}>
-        {/* Botão de voltar (apenas para a doutora) */}
-        {isDoctor && (
-          <TouchableOpacity style={styles.backButton} onPress={backToPatientList}>
-            <Text style={styles.backButtonText}>← Voltar</Text>
-          </TouchableOpacity>
-        )}
+      <View style={styles.container}>
+        <View style={styles.header}>
+          {/* Botão de voltar (apenas para a doutora) */}
+          {isDoctor && (
+            <TouchableOpacity style={styles.backButton} onPress={backToPatientList}>
+              <Text style={styles.backButtonText}>← Voltar</Text>
+            </TouchableOpacity>
+          )}
 
-        <Text style={styles.title}>Diário de Emoções</Text>
+          <Text style={styles.title}>Diário de Emoções</Text>
 
-        {/* Botão de adicionar (apenas para pacientes) */}
-        {!isDoctor && (
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => router.push("/(tabs)/diary/select")}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.addButtonText}>+ Novo Registro</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+          {/* Botão de adicionar (apenas para pacientes) */}
+          {!isDoctor && (
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => router.push("/(tabs)/diary/select")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.addButtonText}>+ Novo Registro</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollViewContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#F163E0"]} tintColor="#F163E0" />
-        }
-        onScroll={({ nativeEvent }) => {
-          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent
-          const isEndReached = layoutMeasurement.height + contentOffset.y >= contentSize.height - 20
-          if (isEndReached && hasMore) {
-            loadMore()
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollViewContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#F163E0"]} tintColor="#F163E0" />
           }
-        }}
-        scrollEventThrottle={400}
-      >
-        {entries.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>Nenhum registro encontrado no diário!</Text>
-            {isDoctor ? (
-              <Text style={styles.emptySubtitle}>Este paciente ainda não registrou emoções.</Text>
-            ) : (
-              <>
-                <Text style={styles.emptySubtitle}>Comece a registrar seus sentimentos.</Text>
-                <TouchableOpacity
-                  style={styles.emptyAddButton}
-                  onPress={() => router.push("/(tabs)/diary/select")}
-                  activeOpacity={0.8}
+          onScroll={({ nativeEvent }) => {
+            const { layoutMeasurement, contentOffset, contentSize } = nativeEvent
+            const isEndReached = layoutMeasurement.height + contentOffset.y >= contentSize.height - 20
+            if (isEndReached && hasMore) {
+              loadMore()
+            }
+          }}
+          scrollEventThrottle={400}
+        >
+          {entries.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>Nenhum registro encontrado no diário!</Text>
+              {isDoctor ? (
+                <Text style={styles.emptySubtitle}>Este paciente ainda não registrou emoções.</Text>
+              ) : (
+                <>
+                  <Text style={styles.emptySubtitle}>Comece a registrar seus sentimentos.</Text>
+                  <TouchableOpacity
+                    style={styles.emptyAddButton}
+                    onPress={() => router.push("/(tabs)/diary/select")}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.emptyAddButtonText}>Adicionar primeiro registro</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          ) : (
+            <>
+              {entries.map((entry, index) => (
+                <Animated.View
+                  key={entry.id}
+                  style={[
+                    {
+                      opacity: fadeAnim,
+                      transform: [{ translateY: slideAnim }],
+                    },
+                  ]}
                 >
-                  <Text style={styles.emptyAddButtonText}>Adicionar primeiro registro</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        ) : (
-          <>
-            {entries.map((entry, index) => (
-              <Animated.View
-                key={entry.id}
-                style={[
-                  {
-                    opacity: fadeAnim,
-                    transform: [{ translateY: slideAnim }],
-                  },
-                ]}
-              >
-                <View style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.emotionContainer}>
-                      <Text style={styles.emotionIcon}>{getEmotionIcon(entry.emotion_type)}</Text>
-                      <Text style={styles.emotionType}>{getEmotionTranslated(entry.emotion_type)}</Text>
+                  <View style={styles.card}>
+                    <View style={styles.cardHeader}>
+                      <View style={styles.emotionContainer}>
+                        <Text style={styles.emotionIcon}>{getEmotionIcon(entry.emotion_type)}</Text>
+                        <Text style={styles.emotionType}>{getEmotionTranslated(entry.emotion_type)}</Text>
+                      </View>
+                      <Text style={styles.date}>{formatDate(entry.created_at)}</Text>
                     </View>
-                    <Text style={styles.date}>{formatDate(entry.created_at)}</Text>
-                  </View>
 
-                  <Text style={styles.description}>{entry.emotion_description}</Text>
+                    <Text style={styles.description}>{entry.emotion_description}</Text>
 
-                  <View style={styles.intensityContainer}>
-                    <Text style={styles.intensityLabel}>Intensidade</Text>
-                    <View style={styles.intensityBarContainer}>
-                      <View
-                        style={[
-                          styles.intensityBar,
-                          {
-                            width: `${entry.intensity}%`,
-                            backgroundColor: getEmotionColor(entry.emotion_type),
-                          },
-                        ]}
-                      />
+                    <View style={styles.intensityContainer}>
+                      <Text style={styles.intensityLabel}>Intensidade</Text>
+                      <View style={styles.intensityBarContainer}>
+                        <View
+                          style={[
+                            styles.intensityBar,
+                            {
+                              width: `${entry.intensity}%`,
+                              backgroundColor: getEmotionColor(entry.emotion_type),
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.intensityValue}>{entry.intensity}%</Text>
                     </View>
-                    <Text style={styles.intensityValue}>{entry.intensity}%</Text>
                   </View>
+                </Animated.View>
+              ))}
+
+              {loading && hasMore && (
+                <View style={styles.loadingMoreContainer}>
+                  <ActivityIndicator size="small" color="#F163E0" />
+                  <Text style={styles.loadingMoreText}>Carregando mais registros...</Text>
                 </View>
-              </Animated.View>
-            ))}
-
-            {loading && hasMore && (
-              <View style={styles.loadingMoreContainer}>
-                <ActivityIndicator size="small" color="#F163E0" />
-                <Text style={styles.loadingMoreText}>Carregando mais registros...</Text>
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
-    </View>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   )
 }

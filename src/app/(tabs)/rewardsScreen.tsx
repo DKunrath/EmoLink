@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import {
   View,
   Text,
@@ -11,13 +11,16 @@ import {
   Animated,
   SafeAreaView,
   Image,
-  Alert,
   Modal,
+  Platform,
 } from "react-native"
-import { useNavigation } from "@react-navigation/native"
+import { useNavigation, useFocusEffect } from "@react-navigation/native"
 import { supabase } from "../../services/supabase"
 import { useAuth } from "../../hooks/useAuth"
 import { LinearGradient } from "expo-linear-gradient"
+// Adicionar a importação da função checkCondition no topo do arquivo
+import { checkCondition } from "../../services/reward"
+import { useAlertContext } from "../../components/alert-provider"
 
 // Interface para as recompensas
 interface Reward {
@@ -46,29 +49,84 @@ const RewardsScreen = () => {
   const [badges, setBadges] = useState<Reward[]>([])
   const [contents, setContents] = useState<Reward[]>([])
   const [userPoints, setUserPoints] = useState<number>(0)
-  const [badgeCondition, setBadgeCondition] = useState<boolean>(false)
   const [redeemedRewardIds, setRedeemedRewardIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [redeeming, setRedeeming] = useState(false)
+  const { success, error2, warning } = useAlertContext()
+  // Novo estado para armazenar os IDs das recompensas que têm suas condições atendidas
+  const [metConditionIds, setMetConditionIds] = useState<string[]>([])
   const { user } = useAuth()
   const navigation = useNavigation()
+
+  // Ref para controlar se já estamos buscando dados
+  const isFetchingRef = useRef(false)
+  // Ref para controlar se o componente está montado
+  const isMountedRef = useRef(true)
+  // Ref para armazenar timeouts que precisam ser limpos
+  const timeoutsRef = useRef<NodeJS.Timeout[]>([])
+  // Ref para controlar operações de cancelamento
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current
   const slideAnim = useRef(new Animated.Value(50)).current
 
-  // Função para buscar recompensas e pontos do usuário
-  const fetchRewardsAndPoints = async () => {
+  // Função para limpar todos os timeouts
+  const clearAllTimeouts = useCallback(() => {
+    timeoutsRef.current.forEach((timeout) => clearTimeout(timeout))
+    timeoutsRef.current = []
+  }, [])
+
+  // Função para adicionar um timeout que será limpo automaticamente
+  const safeSetTimeout = useCallback((callback: () => void, delay: number) => {
+    const timeoutId = setTimeout(() => {
+      // Só executa o callback se o componente ainda estiver montado
+      if (isMountedRef.current) {
+        callback()
+      }
+      // Remove este timeout da lista após execução
+      timeoutsRef.current = timeoutsRef.current.filter((id) => id !== timeoutId)
+    }, delay)
+
+    timeoutsRef.current.push(timeoutId)
+    return timeoutId
+  }, [])
+
+  // Função para buscar recompensas e pontos do usuário - otimizada
+  const fetchRewardsAndPoints = useCallback(async () => {
+    // Evitar múltiplas chamadas simultâneas
+    if (isFetchingRef.current || !isMountedRef.current) return
+
+    // Cancelar qualquer operação anterior
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    // Criar novo controlador para esta operação
+    abortControllerRef.current = new AbortController()
+    const signal = abortControllerRef.current.signal
+
     try {
+      isFetchingRef.current = true
+      if (!isMountedRef.current) return
       setLoading(true)
 
       if (!user) {
-        console.log("Usuário ainda não carregado, tentando novamente em breve...")
-        setTimeout(fetchRewardsAndPoints, 1000) // Tentar novamente em 1 segundo
+        if (isMountedRef.current) {
+          safeSetTimeout(() => {
+            isFetchingRef.current = false
+            if (isMountedRef.current) {
+              fetchRewardsAndPoints()
+            }
+          }, 1000) // Tentar novamente em 1 segundo
+        }
         return
       }
+
+      // Verificar se a operação foi cancelada
+      if (signal.aborted) return
 
       // 1. Buscar pontos do usuário
       const { data: profileData, error: profileError } = await supabase
@@ -81,6 +139,9 @@ const RewardsScreen = () => {
         throw profileError
       }
 
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
       setUserPoints(profileData?.points || 0)
 
       // 2. Buscar recompensas já resgatadas pelo usuário
@@ -92,6 +153,9 @@ const RewardsScreen = () => {
       if (userRewardsError) {
         throw userRewardsError
       }
+
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
 
       const redeemedIds = userRewards?.map((r) => r.reward_id) || []
       setRedeemedRewardIds(redeemedIds)
@@ -106,235 +170,340 @@ const RewardsScreen = () => {
         throw rewardsError
       }
 
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
       // Separar insígnias e conteúdos
-      const badgeRewards = allRewards?.filter(
-        (r) => (r.gender_type === profileData.gender || r.gender_type === "all") && r.type === "badge"
-      ) || [];
+      const badgeRewards =
+        allRewards?.filter(
+          (r) => (r.gender_type === profileData.gender || r.gender_type === "all") && r.type === "badge",
+        ) || []
       const contentRewards = allRewards?.filter((r) => r.type === "content") || []
-      const userBadgeCondition = badgeRewards.some((reward) => reward.condition)
 
-      setBadges(badgeRewards)
-      setContents(contentRewards)
-      setBadgeCondition(userBadgeCondition)
+      if (isMountedRef.current) {
+        setBadges(badgeRewards)
+        setContents(contentRewards)
+      }
 
-      // Animar a entrada dos componentes
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-      ]).start()
+      // 4. Verificar condições para cada recompensa - OTIMIZADO
+      const metConditions: string[] = []
+
+      // Adicionar automaticamente recompensas já resgatadas às condições atendidas
+      metConditions.push(...redeemedIds)
+
+      // Verificar condições apenas para insígnias não resgatadas
+      const unredeemBadges = badgeRewards.filter((badge) => !redeemedIds.includes(badge.id))
+
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
+      // Usar Promise.all para verificar condições em paralelo
+      const badgeConditionPromises = unredeemBadges.map(async (badge) => {
+        try {
+          // Verificar se a operação foi cancelada
+          if (signal.aborted) return null
+
+          const isConditionMet = await checkCondition(badge.id)
+          if (isConditionMet) {
+            return badge.id
+          }
+          return null
+        } catch (error) {
+          return null
+        }
+      })
+
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
+      const badgeResults = await Promise.all(badgeConditionPromises)
+      metConditions.push(...(badgeResults.filter(Boolean) as string[]))
+
+      // Verificar condições apenas para conteúdos não resgatados que têm condição
+      const unredeemContents = contentRewards.filter(
+        (content) => !redeemedIds.includes(content.id) && content.condition,
+      )
+
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
+      const contentConditionPromises = unredeemContents.map(async (content) => {
+        try {
+          // Verificar se a operação foi cancelada
+          if (signal.aborted) return null
+
+          const isConditionMet = await checkCondition(content.id)
+          if (isConditionMet) {
+            return content.id
+          }
+          return null
+        } catch (error) {
+          return null
+        }
+      })
+
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
+      const contentResults = await Promise.all(contentConditionPromises)
+      metConditions.push(...(contentResults.filter(Boolean) as string[]))
+
+      // Adicionar conteúdos sem condição às condições atendidas
+      const contentsWithoutCondition = contentRewards
+        .filter((content) => !content.condition && !redeemedIds.includes(content.id))
+        .map((content) => content.id)
+
+      metConditions.push(...contentsWithoutCondition)
+
+      // Verificar se a operação foi cancelada ou componente desmontado
+      if (signal.aborted || !isMountedRef.current) return
+
+      // Remover duplicatas
+      const uniqueMetConditions = [...new Set(metConditions)]
+
+      if (isMountedRef.current) {
+        setMetConditionIds(uniqueMetConditions)
+
+        // Animar a entrada dos componentes
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ]).start()
+      }
     } catch (error) {
-      console.error("Erro ao buscar recompensas:", error)
+      if (!signal.aborted && isMountedRef.current) {
+      }
     } finally {
-      setLoading(false)
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
+      isFetchingRef.current = false
     }
-  }
+  }, [user, fadeAnim, slideAnim, safeSetTimeout])
 
-  // Função para resgatar uma recompensa
-  const redeemReward = async (reward: Reward) => {
-    try {
-      if (!user) {
-        Alert.alert("Erro", "Você precisa estar logado para resgatar recompensas.")
-        return
-      }
+  // Função para resgatar uma recompensa - otimizada
+  const redeemReward = useCallback(
+    async (reward: Reward) => {
+      if (!isMountedRef.current) return
 
-      if (userPoints < reward.points_required) {
-        Alert.alert("Pontos insuficientes", "Você não tem pontos suficientes para resgatar esta recompensa.")
-        return
-      }
+      try {
+        if (!user) {
+          error2("Erro!", " Você precisa estar logado para resgatar recompensas.");
+          return
+        }
 
-      if(!badgeCondition && reward.type === "badge") {
-        Alert.alert("Condição não atendida", "Você precisa atender a condição para resgatar esta insígnia.")
-        return
-      }
+        if (userPoints < reward.points_required) {
+          error2("Pontos insuficientes", "Você não tem pontos suficientes para resgatar esta recompensa.")
+          return
+        }
 
-      setRedeeming(true)
+        // Verificar se a condição foi atendida usando o estado metConditionIds
+        const isConditionMet = metConditionIds.includes(reward.id)
 
-      // Registrar a recompensa como resgatada
-      const { error: redeemError } = await supabase.from("user_rewards").insert([
-        {
-          user_id: user.id,
-          reward_id: reward.id,
-        },
-      ])
+        if (reward.type === "badge" && !isConditionMet) {
+          error2("Condição não atendida", "Você precisa atender a condição para resgatar esta insígnia.")
+          return
+        }
 
-      if (redeemError) {
-        throw redeemError
-      }
+        setRedeeming(true)
 
-      // Atualizar a lista de recompensas resgatadas
-      setRedeemedRewardIds([...redeemedRewardIds, reward.id])
-
-      // Mostrar mensagem de sucesso
-      Alert.alert("Recompensa Resgatada!", `Você resgatou com sucesso: ${reward.name}`, [
-        {
-          text: "OK",
-          onPress: () => {
-            setModalVisible(false)
-            setSelectedReward(null)
+        // Registrar a recompensa como resgatada
+        const { error: redeemError } = await supabase.from("user_rewards").insert([
+          {
+            user_id: user.id,
+            reward_id: reward.id,
           },
-        },
-      ])
+        ])
 
-      // Atualizar a lista de recompensas
-      fetchRewardsAndPoints()
-    } catch (error) {
-      console.error("Erro ao resgatar recompensa:", error)
-      Alert.alert("Erro", "Não foi possível resgatar a recompensa. Tente novamente mais tarde.")
-    } finally {
-      setRedeeming(false)
-    }
-  }
+        if (redeemError) {
+          throw redeemError
+        }
+
+        // Fechar o modal antes de mostrar a mensagem de sucesso
+        if (isMountedRef.current) {
+          setModalVisible(false)
+        }
+
+        // Atualizar a lista de recompensas resgatadas localmente
+        if (isMountedRef.current) {
+          setRedeemedRewardIds((prev) => [...prev, reward.id])
+          // Adicionar à lista de condições atendidas
+          setMetConditionIds((prev) => [...prev, reward.id])
+        }
+
+        // Mostrar mensagem de sucesso após um pequeno delay para garantir que o modal fechou
+        safeSetTimeout(() => {
+          if (isMountedRef.current) {
+            success("Sucesso!", `Recompensa resgatada com sucesso: ${reward.name}`)
+          }
+        }, 300)
+      } catch (error) {
+        if (isMountedRef.current) {
+          error2("Erro!", "Não foi possível resgatar a recompensa. Tente novamente mais tarde.")
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setRedeeming(false)
+        }
+      }
+    },
+    [user, userPoints, metConditionIds, safeSetTimeout],
+  )
 
   // Função para abrir o modal de detalhes da recompensa
-  const openRewardDetails = (reward: Reward) => {
-    setSelectedReward(reward)
-    setModalVisible(true)
-  }
-
-  // Carregar recompensas ao montar o componente
-  useEffect(() => {
-    if (user) {
-      fetchRewardsAndPoints()
-    } else {
-      // Se o usuário ainda não estiver carregado, configurar um intervalo para verificar
-      const checkAuthInterval = setInterval(() => {
-        if (user) {
-          fetchRewardsAndPoints()
-          clearInterval(checkAuthInterval)
-        }
-      }, 500)
-
-      // Limpar o intervalo quando o componente for desmontado
-      return () => clearInterval(checkAuthInterval)
+  const openRewardDetails = useCallback((reward: Reward) => {
+    if (isMountedRef.current) {
+      setSelectedReward(reward)
+      setModalVisible(true)
     }
-  }, [user])
+  }, [])
 
-  // Atualizar recompensas quando a tela receber foco
+  // Efeito para definir o componente como montado/desmontado
   useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () => {
-      if (user) {
+    isMountedRef.current = true
+
+    return () => {
+      // Marcar o componente como desmontado
+      isMountedRef.current = false
+
+      // Cancelar qualquer operação em andamento
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+
+      // Limpar todos os timeouts
+      clearAllTimeouts()
+    }
+  }, [clearAllTimeouts])
+
+  // Usar useFocusEffect em vez de useEffect + navigation.addListener
+  // Isso garante que o código só será executado quando a tela estiver em foco
+  useFocusEffect(
+    useCallback(() => {
+      if (user && !isFetchingRef.current) {
         fetchRewardsAndPoints()
       }
-    })
 
-    return unsubscribe
-  }, [navigation, user])
+      return () => {
+        // Cancelar operações quando a tela perder o foco
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort()
+        }
+      }
+    }, [user, fetchRewardsAndPoints]),
+  )
 
-  // Função para renderizar uma recompensa
-  const renderReward = (reward: Reward, index: number) => {
-    const isRedeemed = redeemedRewardIds.includes(reward.id)
-    const canRedeem = userPoints >= reward.points_required
-    const conditionMet = reward.condition
-    const statusText = isRedeemed
-      ? "Resgatado"
-      : canRedeem
-        ? "Disponível"
-        : `Faltam ${reward.points_required - userPoints} pontos`
+  // Função para renderizar uma recompensa - memoizada
+  const renderReward = useCallback(
+    (reward: Reward, index: number) => {
+      const isRedeemed = redeemedRewardIds.includes(reward.id)
+      const canRedeem = userPoints >= reward.points_required
+      const conditionMet = metConditionIds.includes(reward.id)
 
-    const statusTextCondition = conditionMet
-      ? "Condição atendida"
-      : conditionMet
-        ? "Condição atendida"
-        : `Condição não atendida`
+      const statusText = isRedeemed
+        ? "Resgatado"
+        : canRedeem
+          ? "Disponível"
+          : `Faltam ${reward.points_required - userPoints} pontos`
 
-    return (
-      <Animated.View
-        key={reward.id}
-        style={[
-          styles.rewardCard,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.rewardCardContent}
-          onPress={() => openRewardDetails(reward)}
-          activeOpacity={0.8}
+      const statusTextCondition = conditionMet ? "Condição atendida" : "Condição não atendida"
+
+      return (
+        <Animated.View
+          key={reward.id}
+          style={[
+            styles.rewardCard,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
         >
-          <View style={styles.rewardImageContainer}>
-            {reward.image_url ? (
-              <Image source={{ uri: reward.image_url }} style={styles.rewardImage} />
-            ) : (
-              <View style={styles.rewardImagePlaceholder}>
-                <Text style={styles.rewardImagePlaceholderText}>{reward.type === "badge" ? "🏆" : "📄"}</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.rewardInfo}>
-            <Text style={styles.rewardName}>{reward.name}</Text>
-            <Text style={styles.rewardPointsValue}>Condição para Desbloquear</Text>
-            <Text style={styles.rewardDescription} numberOfLines={2} ellipsizeMode="tail">
-              {reward.description}
-            </Text>
-            <View style={styles.rewardPointsContainer}>
-              <Text style={styles.rewardPointsLabel}>Pontos necessários:</Text>
-              <Text style={styles.rewardPointsValue}>{reward.points_required}</Text>
+          <TouchableOpacity
+            style={styles.rewardCardContent}
+            onPress={() => openRewardDetails(reward)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.rewardImageContainer}>
+              {reward.image_url ? (
+                Platform.OS === "web" ? (
+                  <img src={reward.image_url || "/placeholder.svg"} alt={reward.name} style={styles.rewardImage} />
+                ) : (
+                  <Image source={{ uri: reward.image_url }} style={styles.rewardImage} />
+                )
+              ) : (
+                <View style={styles.rewardImagePlaceholder}>
+                  <Text style={styles.rewardImagePlaceholderText}>{reward.type === "badge" ? "🏆" : "📄"}</Text>
+                </View>
+              )}
             </View>
 
-            <View style={{ flexDirection: "column", justifyContent: "space-evenly", alignItems: "center" }}>
-              <View
-                style={[
-                  styles.rewardStatus1,
-                  isRedeemed ? styles.redeemedStatus : canRedeem ? styles.availableStatus : styles.lockedStatus,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.rewardStatusText,
-                    isRedeemed
-                      ? styles.redeemedStatusText
-                      : canRedeem
-                        ? styles.availableStatusText
-                        : styles.lockedStatusText,
-                  ]}
-                >
-                  {statusText}
-                </Text>
+            <View style={styles.rewardInfo}>
+              <Text style={styles.rewardName}>{reward.name}</Text>
+              <Text style={styles.rewardPointsValue}>Condição para Desbloquear</Text>
+              <Text style={styles.rewardDescription} numberOfLines={2} ellipsizeMode="tail">
+                {reward.description}
+              </Text>
+              <View style={styles.rewardPointsContainer}>
+                <Text style={styles.rewardPointsLabel}>Pontos necessários:</Text>
+                <Text style={styles.rewardPointsValue}>{reward.points_required}</Text>
               </View>
 
-              <View
-                style={[
-                  styles.rewardStatus2,
-                  isRedeemed ? styles.redeemedStatus : canRedeem ? styles.availableStatus : styles.lockedStatus,
-                ]}
-              >
-                <Text
+              <View style={{ flexDirection: "column", justifyContent: "space-evenly", alignItems: "center" }}>
+                <View
                   style={[
-                    styles.rewardStatusText,
-                    isRedeemed
-                      ? styles.redeemedStatusText
-                      : canRedeem
-                        ? styles.availableStatusText
-                        : styles.lockedStatusText,
+                    styles.rewardStatus1,
+                    isRedeemed ? styles.redeemedStatus : canRedeem ? styles.availableStatus : styles.lockedStatus,
                   ]}
                 >
-                  {statusTextCondition}
-                </Text>
+                  <Text
+                    style={[
+                      styles.rewardStatusText,
+                      isRedeemed
+                        ? styles.redeemedStatusText
+                        : canRedeem
+                          ? styles.availableStatusText
+                          : styles.lockedStatusText,
+                    ]}
+                  >
+                    {statusText}
+                  </Text>
+                </View>
+
+                <View style={[styles.rewardStatus2, conditionMet ? styles.availableStatus : styles.lockedStatus]}>
+                  <Text
+                    style={[
+                      styles.rewardStatusText,
+                      conditionMet ? styles.availableStatusText : styles.lockedStatusText,
+                    ]}
+                  >
+                    {statusTextCondition}
+                  </Text>
+                </View>
               </View>
             </View>
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    )
-  }
+          </TouchableOpacity>
+        </Animated.View>
+      )
+    },
+    [fadeAnim, slideAnim, redeemedRewardIds, userPoints, metConditionIds, openRewardDetails],
+  )
 
-  // Modal de detalhes da recompensa
-  const renderRewardDetailsModal = () => {
+  // Modal de detalhes da recompensa - memoizado
+  const renderRewardDetailsModal = useCallback(() => {
     if (!selectedReward) return null
 
     const isRedeemed = redeemedRewardIds.includes(selectedReward.id)
     const canRedeem = userPoints >= selectedReward.points_required
+    const conditionMet = metConditionIds.includes(selectedReward.id)
 
     return (
       <Modal
@@ -342,8 +511,10 @@ const RewardsScreen = () => {
         transparent={true}
         animationType="slide"
         onRequestClose={() => {
-          setModalVisible(false)
-          setSelectedReward(null)
+          if (isMountedRef.current) {
+            setModalVisible(false)
+            setSelectedReward(null)
+          }
         }}
       >
         <View style={styles.modalOverlay}>
@@ -351,8 +522,10 @@ const RewardsScreen = () => {
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => {
-                setModalVisible(false)
-                setSelectedReward(null)
+                if (isMountedRef.current) {
+                  setModalVisible(false)
+                  setSelectedReward(null)
+                }
               }}
             >
               <Text style={styles.modalCloseButtonText}>✕</Text>
@@ -384,6 +557,25 @@ const RewardsScreen = () => {
                 <Text style={styles.modalPointsValue}>{userPoints}</Text>
               </View>
 
+              {selectedReward.type === "badge" && (
+                <View
+                  style={[
+                    styles.modalConditionContainer,
+                    conditionMet ? styles.modalConditionMet : styles.modalConditionNotMet,
+                  ]}
+                >
+                  <Text style={styles.modalConditionLabel}>Status da condição:</Text>
+                  <Text
+                    style={[
+                      styles.modalConditionValue,
+                      conditionMet ? styles.modalConditionMetText : styles.modalConditionNotMetText,
+                    ]}
+                  >
+                    {conditionMet ? "Atendida" : "Não atendida"}
+                  </Text>
+                </View>
+              )}
+
               {selectedReward.type === "content" && selectedReward.content_type && (
                 <View style={styles.modalContentTypeContainer}>
                   <Text style={styles.modalContentTypeLabel}>Tipo de conteúdo:</Text>
@@ -402,7 +594,7 @@ const RewardsScreen = () => {
                       style={styles.modalViewContentButton}
                       onPress={() => {
                         // Implementar visualização do conteúdo
-                        Alert.alert("Visualizar conteúdo", "Funcionalidade a ser implementada")
+                        warning("Atenção!", "Funcionalidade a ser implementada")
                       }}
                     >
                       <Text style={styles.modalViewContentButtonText}>
@@ -413,17 +605,22 @@ const RewardsScreen = () => {
                 </View>
               ) : (
                 <TouchableOpacity
-                  style={[styles.modalRedeemButton, (!canRedeem || redeeming) && styles.modalRedeemButtonDisabled]}
+                  style={[
+                    styles.modalRedeemButton,
+                    (!canRedeem || !conditionMet || redeeming) && styles.modalRedeemButtonDisabled,
+                  ]}
                   onPress={() => redeemReward(selectedReward)}
-                  disabled={!canRedeem || redeeming}
+                  disabled={!canRedeem || !conditionMet || redeeming}
                 >
                   {redeeming ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
                     <Text style={styles.modalRedeemButtonText}>
-                      {canRedeem
-                        ? "Resgatar Recompensa"
-                        : `Faltam ${selectedReward.points_required - userPoints} pontos`}
+                      {!canRedeem
+                        ? `Faltam ${selectedReward.points_required - userPoints} pontos`
+                        : !conditionMet
+                          ? "Condição não atendida"
+                          : "Resgatar Recompensa"}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -433,7 +630,7 @@ const RewardsScreen = () => {
         </View>
       </Modal>
     )
-  }
+  }, [selectedReward, modalVisible, redeemedRewardIds, userPoints, metConditionIds, redeeming, redeemReward])
 
   if (loading) {
     return (
@@ -447,7 +644,17 @@ const RewardsScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            // Cancelar operações antes de navegar
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort()
+            }
+            clearAllTimeouts()
+            navigation.goBack()
+          }}
+        >
           <Text style={styles.backButtonText}>← Voltar</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Recompensas</Text>
@@ -517,7 +724,14 @@ const RewardsScreen = () => {
           )}
         </View>
 
-        <TouchableOpacity style={styles.refreshButton} onPress={fetchRewardsAndPoints}>
+        <TouchableOpacity
+          style={styles.refreshButton}
+          onPress={() => {
+            if (!isFetchingRef.current) {
+              fetchRewardsAndPoints()
+            }
+          }}
+        >
           <Text style={styles.refreshButtonText}>Atualizar Recompensas</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -722,7 +936,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#D1FAE5",
   },
   availableStatus: {
-    backgroundColor: "#EEF2FF",
+    backgroundColor: "#D1FAE5",
   },
   lockedStatus: {
     backgroundColor: "#FEF2F2",
@@ -735,7 +949,7 @@ const styles = StyleSheet.create({
     color: "#059669",
   },
   availableStatusText: {
-    color: "#4F46E5",
+    color: "#059669",
   },
   lockedStatusText: {
     color: "#DC2626",
@@ -819,7 +1033,7 @@ const styles = StyleSheet.create({
   },
   modalImageContainer: {
     width: "100%",
-    height: 200,
+    height: 300,
     borderRadius: 12,
     overflow: "hidden",
     marginBottom: 20,
@@ -869,6 +1083,35 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     color: "#111827",
+  },
+  modalConditionContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  modalConditionMet: {
+    backgroundColor: "#DCFCE7",
+  },
+  modalConditionNotMet: {
+    backgroundColor: "#FEE2E2",
+  },
+  modalConditionLabel: {
+    fontSize: 16,
+    color: "#6B7280",
+  },
+  modalConditionValue: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalConditionMetText: {
+    color: "#059669",
+  },
+  modalConditionNotMetText: {
+    color: "#DC2626",
   },
   modalContentTypeContainer: {
     flexDirection: "row",

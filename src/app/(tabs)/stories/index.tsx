@@ -75,12 +75,12 @@ export default function StoriesScreen() {
       const { data, error } = await supabase.from("stories").select("*").order("created_at", { ascending: true })
 
       if (error) {
-        console.error("Erro ao buscar histórias:", error)
+        return false
       } else {
         setStories(data || [])
       }
     } catch (error) {
-      console.error("Erro em fetchStories:", error)
+      return false
     } finally {
       setLoading(false)
     }
@@ -141,7 +141,6 @@ export default function StoriesScreen() {
                       .single()
 
                     if (profileError) {
-                      console.error("Error fetching profile:", profileError)
                       // Navigate with default content if there's an error
                       navigation.navigate("StoryPageScreen", { storyId: story.id })
                       return
@@ -150,15 +149,13 @@ export default function StoriesScreen() {
                     // Determine content type based on age group
                     const useChildContent = profileData?.age_group === "05 - 10"
 
-                    console.log(useChildContent)
-
                     // Navigate with content type parameter
                     navigation.navigate("StoryPageScreen", {
                       storyId: story.id,
                       useChildContent: useChildContent,
+                      ageSelected: profileData?.age_group,
                     })
                   } catch (error) {
-                    console.error("Error in navigation:", error)
                     // Navigate with default content if there's an error
                     navigation.navigate("StoryPageScreen", { storyId: story.id })
                   }

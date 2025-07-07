@@ -69,7 +69,6 @@ const Chat = () => {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Error fetching messages:', error);
       } else {
         setMessages(data || []);
         
@@ -86,7 +85,6 @@ const Chat = () => {
         }, 100);
       }
     } catch (error) {
-      console.error('Error in fetchMessages:', error);
     } finally {
       setLoading(false);
     }
@@ -96,12 +94,10 @@ const Chat = () => {
     try {
       const { data: user, error } = await supabase.auth.getUser();
       if (error) {
-        console.error('Error fetching user ID:', error);
       } else {
         setUserId(user?.user?.id || null);
       }
     } catch (error) {
-      console.error('Error in fetchUserId:', error);
     }
   };
 
@@ -119,14 +115,12 @@ const Chat = () => {
         ]);
 
         if (error) {
-          console.error('Error sending message:', error);
         } else {
           setNewMessage('');
           await updateLastMessage(newMessage);
           await updateUnreadCount();
         }
       } catch (error) {
-        console.error('Error in sendMessage:', error);
       } finally {
         setSending(false);
       }
@@ -141,10 +135,8 @@ const Chat = () => {
         .eq('id', chatId);
 
       if (error) {
-        console.error('Error updating last message:', error);
       }
     } catch (error) {
-      console.error('Error in updateLastMessage:', error);
     }
   };
 
@@ -160,7 +152,6 @@ const Chat = () => {
         .single();
   
       if (fetchError) {
-        console.error('Error fetching unread count:', fetchError);
         return;
       }
   
@@ -176,10 +167,10 @@ const Chat = () => {
         .eq('id', chatId);
   
       if (updateError) {
-        console.error('Error updating unread count:', updateError);
+        return;
       }
     } catch (error) {
-      console.error('Error in updateUnreadCount:', error);
+      return;
     }
   };
 

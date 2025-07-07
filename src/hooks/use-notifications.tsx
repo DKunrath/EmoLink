@@ -23,11 +23,8 @@ export function useNotifications() {
 
     const setupNotifications = async () => {
       try {
-        console.log("Iniciando configuração de notificações...")
-
         // 1. Registrar para notificações
         await NotificationService.registerForPushNotifications()
-        console.log("Permissões de notificação registradas")
 
         // 2. Configurar categorias de notificação (se necessário)
         if (Platform.OS === "ios") {
@@ -40,16 +37,22 @@ export function useNotifications() {
               },
             },
           ])
-          console.log("Categorias de notificação configuradas")
+        } else if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "Default",
+            importance: Notifications.AndroidImportance.HIGH,
+            sound: "default",
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: "#FF231F7C",
+          })
         }
 
         // 3. Carregar e agendar todas as notificações programadas do banco de dados
         await NotificationManager.scheduleAllNotifications()
-        console.log("Notificações agendadas com sucesso")
 
+        // Marcar como inicializado
         setIsInitialized(true)
       } catch (error) {
-        console.error("Erro ao configurar notificações:", error)
         // Resetar o estado de inicialização em caso de erro
         initializationRef.current = false
       }
@@ -57,7 +60,10 @@ export function useNotifications() {
 
     // Configurar listener para quando uma notificação é recebida
     const subscription = Notifications.addNotificationReceivedListener((notification) => {
-      console.log("Notificação recebida:", notification)
+      // Marcar a notificação como lida se tiver um ID
+      if (notification.request.content.data.sentNotificationId) {
+        NotificationManager.markNotificationAsRead(notification.request.content.data.sentNotificationId)
+      }
     })
 
     // Configurar listener para quando o usuário toca em uma notificação
@@ -92,7 +98,6 @@ export function useNotifications() {
         if (data.actionData?.screen) {
           // Navegar para a tela especificada
           // router.push(data.actionData.screen, data.actionData.params)
-          console.log("Navegando para:", data.actionData.screen, data.actionData.params)
         }
         break
 
@@ -100,12 +105,11 @@ export function useNotifications() {
         if (data.actionData?.url) {
           // Abrir URL
           // Linking.openURL(data.actionData.url)
-          console.log("Abrindo URL:", data.actionData.url)
         }
         break
 
       default:
-        console.log("Tipo de ação desconhecido:", data.actionType)
+        break
     }
   }
 
