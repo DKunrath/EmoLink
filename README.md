@@ -1,5 +1,4 @@
-EmoLink
-🚀 EmoLink é uma plataforma desenvolvida para conectar emoções a experiências digitais de forma intuitiva e inteligente. Seu objetivo é integrar reconhecimento emocional em aplicações modernas, proporcionando interações mais humanas e contextuais.
+EmoLink é uma plataforma desenvolvida para conectar emoções a experiências digitais de forma intuitiva e inteligente. Seu objetivo é integrar reconhecimento emocional em aplicações modernas, proporcionando interações mais humanas e contextuais.
 
 ✨ Funcionalidades
 🎭 Detecção e classificação de emoções em tempo real.
